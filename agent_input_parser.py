@@ -44,31 +44,28 @@ def highlight_placeholders(terraform_code: str) -> str:
 
 # ---------- 3. Infracost estimation ----------
 def estimate_infracost() -> str:
+    require_executable("terraform")
+    require_executable("infracost")
+
     try:
         subprocess.run(["terraform", "init", "-input=false"], check=True)
-        
-        plan = subprocess.run(
-            ["terraform", "plan", "-out=tfplan.binary"],
-            capture_output=True,
-            text=True
-        )
-        if plan.returncode != 0:
-            return f"❌ terraform plan failed:\n{plan.stderr or plan.stdout}"
+        subprocess.run(["terraform", "plan", "-out=tfplan.binary"], check=True)
 
-        subprocess.run(["terraform", "show", "-json", "tfplan.binary"], stdout=open("tfplan.json", "w"), check=True)
+        with open("tfplan.json", "w", encoding="utf-8") as f:
+            subprocess.run(["terraform", "show", "-json", "tfplan.binary"], stdout=f, check=True)
 
         result = subprocess.run(
             ["infracost", "breakdown", "--path=tfplan.json", "--format=table"],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
+            encoding="utf-8"  # ✅ Ensures unicode is handled properly
         )
-        return result.stdout
 
+        return result.stdout.strip() or "⚠️ Infracost returned empty output."
     except subprocess.CalledProcessError as e:
         return f"❌ Infracost error:\n{e.stderr or str(e)}"
-    except Exception as e:
-        return f"❌ Unexpected error during cost estimation:\n{str(e)}"
+
 
 
 

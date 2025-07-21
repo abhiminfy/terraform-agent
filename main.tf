@@ -1,42 +1,20 @@
 resource "aws_instance" "example" {
- ami           = data.aws_ami.amazon_linux_2_latest.id
- instance_type = "t2.micro"
- subnet_id = data.aws_subnet.default.id # Assuming a default VPC and subnet exists. If not, you will need to create them.
-  key_name = "terraform-key" # Replace with your actual key pair name
+  ami           = data.aws_ami.ubuntu.id
+  instance_type = "t2.micro"
+  key_name = aws_key_pair.example.key_name
+
 
   vpc_security_group_ids = ["sg-xxxxxx"]
 
- tags = {
-    Name = "example-instance"
- }
+  tags = {
+    Name = "ExampleAppServerInstance"
+  }
 }
 
-
-
-data "aws_ami" "amazon_linux_2_latest" {
- most_recent = true
- owners      = ["amazon"]
-
- filter {
-    name   = "name"
-    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
- }
- filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
- }
-}
-
-
-data "aws_subnet" "default" {
- availability_zone = "us-east-1a" # Replace with desired availability zone
-  default_for_az = true
-
-}
-
-resource "aws_security_group" "allow_ssh" {
+resource "aws_security_group" "example" {
   name        = "allow_ssh"
- description = "Allow SSH inbound traffic"
+  description = "Allow SSH inbound traffic"
+  vpc_id      = aws_default_vpc.default.id
 
  ingress {
     description      = "SSH from anywhere"
@@ -46,15 +24,41 @@ resource "aws_security_group" "allow_ssh" {
     cidr_blocks      = ["0.0.0.0/0"]
   }
 
- egress {
+  egress {
     from_port        = 0
     to_port          = 0
     protocol        = "-1"
     cidr_blocks      = ["0.0.0.0/0"]
-    ipv6_cidr_blocks = ["::/0"]
- }
+  }
 
- tags = {
+
+  tags = {
     Name = "allow_ssh"
   }
+}
+
+data "aws_ami" "ubuntu" {
+  most_recent = true
+  owners      = ["099720109477"] # Canonical
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+  }
+}
+
+
+
+resource "aws_key_pair" "example" {
+  key_name = "terraform-key"
+ public_key = file("~/.ssh/id_rsa.pub") # Update with your actual public key file
+}
+
+
+data "aws_default_vpc" "default" {
+}
+
+
+output "public_ip" {
+  value = aws_instance.example.public_ip
 }

@@ -29,21 +29,22 @@ if st.button("Generate", type="primary"):
             try:
                 terraform_code, cost_output, git_status = agent_input_parser.parse_user_input(user_prompt)
                 st.success("✅ Done!")
+
+                # Display Terraform code
+                st.subheader("📄 Terraform Configuration")
+                st.code(terraform_code, language="hcl")
+
+                # Display Cost Estimate
+                st.subheader("💰 Cost Estimate")
+                if cost_output and isinstance(cost_output, str) and cost_output.strip():
+                    st.code(cost_output)
+                else:
+                    st.warning("⚠️ No cost estimate returned or an error occurred.")
+
+                # Display GitHub push result
+                st.subheader("🔗 GitHub Push")
+                st.info(git_status)
+
             except Exception as e:
                 st.error(str(e))
                 st.stop()
-
-    # Display Terraform code
-    st.subheader("📄 Terraform Configuration")
-    st.code(terraform_code, language="hcl")
-
-    # Display Cost Estimate
-    st.subheader("💰 Cost Estimate")
-    if cost_output:
-        st.code(cost_output)
-    else:
-        st.warning("No cost estimate returned.")
-
-    # Display GitHub push result
-    st.subheader("🔗 GitHub Push")
-    st.info(git_status)
