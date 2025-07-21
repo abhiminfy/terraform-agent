@@ -1,0 +1,16 @@
+
+.terraform/
+*.tfstate
+*.tfstate.backup
+.tfplan
+tfplan.*
+tfplan.json
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+.vscode/
+.DS_Store
+Thumbs.db

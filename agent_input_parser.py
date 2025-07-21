@@ -36,6 +36,7 @@ def highlight_placeholders(terraform_code: str) -> str:
         r'subnet_id\s*=\s*".+?"': 'subnet_id = "subnet-xxxxxx"',
         r'vpc_security_group_ids\s*=\s*\[.+?\]': 'vpc_security_group_ids = ["sg-xxxxxx"]',
         r'availability_zone\s*=\s*".+?"': 'availability_zone = "us-east-1a"',
+        r'file\("~/.ssh/id_rsa.pub"\)': '"ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQD..."'
     }
     for pattern, replacement in substitutions.items():
         terraform_code = re.sub(pattern, replacement, terraform_code)
@@ -59,14 +60,13 @@ def estimate_infracost() -> str:
             capture_output=True,
             text=True,
             check=True,
-            encoding="utf-8"  # ✅ Ensures unicode is handled properly
+            encoding="utf-8"
         )
 
         return result.stdout.strip() or "⚠️ Infracost returned empty output."
+
     except subprocess.CalledProcessError as e:
         return f"❌ Infracost error:\n{e.stderr or str(e)}"
-
-
 
 
 # ---------- 4. Push to GitHub ----------
@@ -77,6 +77,25 @@ def push_to_github() -> str:
         return "⚠️ GitHub push skipped: Missing GITHUB_TOKEN or GITHUB_REPO in .env"
 
     repo_url = f"https://{github_token}@github.com/{github_repo}.git"
+
+    # Auto-write .gitignore
+    Path(".gitignore").write_text("""
+.terraform/
+*.tfstate
+*.tfstate.backup
+.tfplan
+tfplan.*
+tfplan.json
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+.vscode/
+.DS_Store
+Thumbs.db
+""")
 
     try:
         if not Path(".git").exists():
@@ -100,20 +119,19 @@ def push_to_github() -> str:
 # ---------- 5. Parse User Prompt ----------
 def parse_user_input(user_prompt: str) -> tuple[str, str, str]:
     system_prompt = (
-         "You are an expert Terraform DevOps assistant. "
-    "Only use valid Terraform HCL code. Avoid using unsupported resources like aws_security_group_association. "
-    "Use standard aws_* resources that are supported by the official AWS Terraform provider. "
-    "DO NOT wrap code in markdown ``` blocks. "
-    "Just return plain Terraform code."
+        "You are an expert Terraform DevOps assistant. "
+        "Only use valid Terraform HCL code. Avoid using unsupported resources like aws_security_group_association. "
+        "Use standard aws_* resources that are supported by the official AWS Terraform provider. "
+        "DO NOT wrap code in markdown ``` blocks. "
+        "Just return plain Terraform code."
     )
 
-    # 🧹 Clean previous files
+    # Clean up previous files
     for f in Path(".").glob(".terraform*"):
         shutil.rmtree(f, ignore_errors=True) if f.is_dir() else f.unlink(missing_ok=True)
     for f in ("terraform.tfstate", "terraform.tfstate.backup", "main.tf", "tfplan.binary", "tfplan.json"):
         Path(f).unlink(missing_ok=True)
 
-    # ✅ Check dependencies
     require_executable("terraform")
     require_executable("infracost")
     require_executable("git")
@@ -124,18 +142,23 @@ def parse_user_input(user_prompt: str) -> tuple[str, str, str]:
         ])
         raw_code = response.text
 
-        # Clean output
+        # Clean formatting
         raw_code = re.sub(r"```(?:terraform|hcl)?\n(.*?)```", r"\1", raw_code, flags=re.DOTALL).strip()
         raw_code = raw_code.split("```")[0].strip()
 
-        # Remove known bad resource types
+        # Remove unsupported resources
         raw_code = re.sub(r'resource\s+"aws_security_group_association".*?\{.*?\}\n?', "", raw_code, flags=re.DOTALL)
 
-        # Patch values & save
+        # Inject default VPC if not present
+        if "aws_default_vpc" in raw_code and 'resource "aws_default_vpc"' not in raw_code:
+            raw_code = 'resource "aws_default_vpc" "default" {}\n\n' + raw_code
+
+        # Apply placeholder patches
         cleaned_code = highlight_placeholders(raw_code)
+
+        # Save to file
         Path("main.tf").write_text(cleaned_code, encoding="utf-8")
 
-        # Run cost + git
         cost_output = estimate_infracost()
         git_output = push_to_github()
 
