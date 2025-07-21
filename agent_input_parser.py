@@ -37,17 +37,20 @@ def estimate_infracost() -> str:
     require_executable("terraform")
     require_executable("infracost")
 
-    subprocess.run(["terraform", "init"], check=True)
-    subprocess.run(["terraform", "plan", "-out=tfplan.binary"], check=True)
-    subprocess.run(["terraform", "show", "-json", "tfplan.binary"], stdout=open("tfplan.json", "w"), check=True)
+    try:
+        subprocess.run(["terraform", "init", "-input=false"], check=True)
+        subprocess.run(["terraform", "plan", "-out=tfplan.binary"], check=True)
+        subprocess.run(["terraform", "show", "-json", "tfplan.binary"], stdout=open("tfplan.json", "w"), check=True)
 
-    result = subprocess.run(
-        ["infracost", "breakdown", "--path=tfplan.json", "--format=table"],
-        capture_output=True,
-        text=True,
-        check=True
-    )
-    return result.stdout
+        result = subprocess.run(
+            ["infracost", "breakdown", "--path=tfplan.json", "--format=table"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout
+    except subprocess.CalledProcessError as e:
+        return f"❌ Infracost error:\n{e.stderr or str(e)}"
 
 # ---------- 3. push to GitHub ----------
 def push_to_github() -> str:
@@ -76,7 +79,7 @@ def push_to_github() -> str:
     except subprocess.CalledProcessError as e:
         return f"❌ GitHub push failed:\n{e.stderr or str(e)}"
 
-# ---------- 4. load env ----------
+# ---------- 4. Load env and set up Gemini ----------
 load_dotenv()
 
 API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -86,7 +89,7 @@ if not API_KEY:
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel("gemini-1.5-pro")
 
-# ---------- 5. main entry ----------
+# ---------- 5. Main Entry ----------
 def parse_user_input(user_prompt: str) -> tuple[str, str, str]:
     system_prompt = (
         "You are an AI DevOps assistant. Generate strictly-valid HCL Terraform code. "
@@ -107,17 +110,19 @@ def parse_user_input(user_prompt: str) -> tuple[str, str, str]:
     try:
         response = model.generate_content([{"role": "user", "parts": [system_prompt + "\n" + user_prompt]}])
         raw_code = response.text
+
         raw_code = re.sub(r"```(?:terraform|hcl)?\n(.*?)```", r"\1", raw_code, flags=re.DOTALL)
         raw_code = raw_code.split("```")[0].strip()
         cleaned_code = highlight_placeholders(raw_code)
 
         Path("main.tf").write_text(cleaned_code, encoding="utf-8")
 
-        cost_table = estimate_infracost()
-        github_status = push_to_github()
+        cost_output = estimate_infracost()
+        git_output = push_to_github()
 
-        return cleaned_code, cost_table, github_status
+        return cleaned_code, cost_output, git_output
 
     except Exception as e:
         raise RuntimeError(str(e))
+
 
