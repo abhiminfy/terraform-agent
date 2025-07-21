@@ -1,22 +1,18 @@
 resource "aws_instance" "example" {
- ami           = data.aws_ami.ubuntu.id
+ ami           = data.aws_ami.amazon_linux_2_latest.id
  instance_type = "t2.micro"
 
   tags = {
-    Name = "example-instance"
+    Name = "example-ec2-instance"
   }
 }
 
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners      = ["099720109477"] # Canonical
+data "aws_ami" "amazon_linux_2_latest" {
+ most_recent = true
+ owners      = ["amazon"]
 
-  filter {
+ filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
-  }
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
   }
 }

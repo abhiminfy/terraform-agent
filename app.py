@@ -17,28 +17,27 @@ user_prompt = st.text_area(
 
 if st.button("Generate", type="primary"):
     if not user_prompt.strip():
-        st.warning("⚠️ Please enter a valid prompt.")
+        st.warning("Please enter a prompt.")
         st.stop()
 
     import io
     import contextlib
     log_capture = io.StringIO()
 
-    with st.spinner("⏳ Generating Terraform, estimating cost, and pushing to GitHub..."):
+    with st.spinner("Generating Terraform, estimating cost & pushing to GitHub..."):
         with contextlib.redirect_stdout(log_capture):
             try:
-                terraform_code, cost_estimate = agent_input_parser.parse_user_input(user_prompt)
-                st.success("✅ Done! Your Terraform code is ready, estimated, and pushed to GitHub.")
+                terraform_code, cost_output, git_status = agent_input_parser.parse_user_input(user_prompt)
+                st.success("✅ Done!")
             except Exception as e:
-                st.error(f"❌ Error: {e}")
+                st.error(str(e))
                 st.stop()
 
-    # Output
     st.subheader("📄 Terraform Configuration")
     st.code(terraform_code, language="hcl")
 
     st.subheader("💰 Cost Estimate")
-    st.text(cost_estimate.strip())
+    st.text(cost_output)
 
     st.subheader("🔗 GitHub Push")
-    st.info("The generated code was committed and pushed to your configured GitHub repo.")
+    st.info(git_status)
