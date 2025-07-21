@@ -7,36 +7,43 @@ from pathlib import Path
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-# ---------- helper: check CLI exists ----------
+# ---------- 0. Load env & configure Gemini ----------
+load_dotenv()
+
+API_KEY = os.getenv("GOOGLE_API_KEY")
+if not API_KEY:
+    raise RuntimeError("❌ Missing GOOGLE_API_KEY in your .env file.")
+
+genai.configure(api_key=API_KEY)
+model = genai.GenerativeModel("gemini-1.5-pro")
+
+
+# ---------- 1. CLI dependency check ----------
 def require_executable(name: str) -> None:
     if shutil.which(name) is None:
-        raise RuntimeError(
-            f"❌ Required executable '{name}' was not found on PATH. "
-            f"Please install {name} and restart the application."
-        )
+        raise RuntimeError(f"❌ Required executable '{name}' not found. Please install it.")
 
-# ---------- 1. highlight placeholders ----------
+
+# ---------- 2. Placeholder patching ----------
 def highlight_placeholders(terraform_code: str) -> str:
     substitutions = {
         r'ami\s*=\s*".+?"': 'ami = "ami-09ac0b140f63d3458"',
         r'username\s*=\s*".+?"': 'username = "adminuser"',
         r'password\s*=\s*".+?"': 'password = "MyS3cur3P@ssw0rd!"',
-        r'db_name\s*=\s*".+?"': 'db_name = "<terraform-db-subnet-group>"',
+        r'db_name\s*=\s*".+?"': 'db_name = "terraform-db"',
         r'identifier\s*=\s*".+?"': 'identifier = "terraform-mysql-db"',
         r'key_name\s*=\s*".+?"': 'key_name = "terraform-key"',
-        r'subnet_id\s*=\s*".+?"': 'subnet_id = "subnet-0be2812d720cb27e1"',
-        r'vpc_security_group_ids\s*=\s*\[.+?\]': 'vpc_security_group_ids = ["sg-087ec30e65e4381af"]',
+        r'subnet_id\s*=\s*".+?"': 'subnet_id = "subnet-xxxxxx"',
+        r'vpc_security_group_ids\s*=\s*\[.+?\]': 'vpc_security_group_ids = ["sg-xxxxxx"]',
         r'availability_zone\s*=\s*".+?"': 'availability_zone = "us-east-1a"',
     }
     for pattern, replacement in substitutions.items():
         terraform_code = re.sub(pattern, replacement, terraform_code)
     return terraform_code
 
-# ---------- 2. infracost estimate ----------
-def estimate_infracost() -> str:
-    require_executable("terraform")
-    require_executable("infracost")
 
+# ---------- 3. Infracost estimation ----------
+def estimate_infracost() -> str:
     try:
         subprocess.run(["terraform", "init", "-input=false"], check=True)
         subprocess.run(["terraform", "plan", "-out=tfplan.binary"], check=True)
@@ -51,11 +58,12 @@ def estimate_infracost() -> str:
         return result.stdout
     except subprocess.CalledProcessError as e:
         return f"❌ Infracost error:\n{e.stderr or str(e)}"
+    except Exception as e:
+        return f"❌ Unexpected error during cost estimation:\n{str(e)}"
 
-# ---------- 3. push to GitHub ----------
+
+# ---------- 4. Push to GitHub ----------
 def push_to_github() -> str:
-    require_executable("git")
-
     github_token = os.getenv("GITHUB_TOKEN")
     github_repo = os.getenv("GITHUB_REPO")
     if not github_token or not github_repo:
@@ -78,51 +86,53 @@ def push_to_github() -> str:
         return "✅ Code pushed successfully to GitHub."
     except subprocess.CalledProcessError as e:
         return f"❌ GitHub push failed:\n{e.stderr or str(e)}"
+    except Exception as e:
+        return f"❌ Unexpected Git push error:\n{str(e)}"
 
-# ---------- 4. Load env and set up Gemini ----------
-load_dotenv()
 
-API_KEY = os.getenv("GOOGLE_API_KEY")
-if not API_KEY:
-    raise RuntimeError("❌ Missing GOOGLE_API_KEY in your .env file.")
-
-genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel("gemini-1.5-pro")
-
-# ---------- 5. Main Entry ----------
+# ---------- 5. Parse User Prompt ----------
 def parse_user_input(user_prompt: str) -> tuple[str, str, str]:
     system_prompt = (
-        "You are an AI DevOps assistant. Generate strictly-valid HCL Terraform code. "
-        "Do NOT include infracost provider, CLI commands, or markdown formatting. "
-        "Respond only with pure Terraform (HCL) resources."
+        "You are an AI DevOps assistant. Generate strictly-valid HCL Terraform code only. "
+        "Do NOT include 'infracost' provider, CLI commands, markdown, or extra commentary. "
+        "Do NOT use resources that do not exist, like 'aws_security_group_association'."
     )
 
-    # Clean up previous state
+    # 🧹 Clean previous files
     for f in Path(".").glob(".terraform*"):
         shutil.rmtree(f, ignore_errors=True) if f.is_dir() else f.unlink(missing_ok=True)
-    for f in ("terraform.tfstate", "terraform.tfstate.backup", "main.tf", "generated.tf", "tfplan.binary", "tfplan.json"):
+    for f in ("terraform.tfstate", "terraform.tfstate.backup", "main.tf", "tfplan.binary", "tfplan.json"):
         Path(f).unlink(missing_ok=True)
 
+    # ✅ Check dependencies
     require_executable("terraform")
     require_executable("infracost")
     require_executable("git")
 
     try:
-        response = model.generate_content([{"role": "user", "parts": [system_prompt + "\n" + user_prompt]}])
+        response = model.generate_content([
+            {"role": "user", "parts": [system_prompt + "\n" + user_prompt]}
+        ])
         raw_code = response.text
 
-        raw_code = re.sub(r"```(?:terraform|hcl)?\n(.*?)```", r"\1", raw_code, flags=re.DOTALL)
+        # Clean output
+        raw_code = re.sub(r"```(?:terraform|hcl)?\n(.*?)```", r"\1", raw_code, flags=re.DOTALL).strip()
         raw_code = raw_code.split("```")[0].strip()
-        cleaned_code = highlight_placeholders(raw_code)
 
+        # Remove known bad resource types
+        raw_code = re.sub(r'resource\s+"aws_security_group_association".*?\{.*?\}\n?', "", raw_code, flags=re.DOTALL)
+
+        # Patch values & save
+        cleaned_code = highlight_placeholders(raw_code)
         Path("main.tf").write_text(cleaned_code, encoding="utf-8")
 
+        # Run cost + git
         cost_output = estimate_infracost()
         git_output = push_to_github()
 
         return cleaned_code, cost_output, git_output
 
     except Exception as e:
-        raise RuntimeError(str(e))
+        raise RuntimeError(f"❌ Error: {str(e)}")
 
 
