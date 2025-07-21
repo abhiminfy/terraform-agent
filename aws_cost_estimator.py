@@ -1,10 +1,16 @@
+"""
+aws_cost_estimator.py
+Exports: estimate_costs() -> None
+"""
+
 import boto3
 import json
 
-def get_ec2_price(instance_type="t2.micro", region="US East (N. Virginia)"):
-    pricing = boto3.client("pricing", region_name="us-east-1")  # Only supported region
-
-    response = pricing.get_products(
+# ---------- helpers ----------
+def get_ec2_price(instance_type="t2.micro",
+                  region="US East (N. Virginia)") -> float:
+    pricing = boto3.client("pricing", region_name="us-east-1")
+    resp = pricing.get_products(
         ServiceCode="AmazonEC2",
         Filters=[
             {"Type": "TERM_MATCH", "Field": "instanceType", "Value": instance_type},
@@ -16,17 +22,15 @@ def get_ec2_price(instance_type="t2.micro", region="US East (N. Virginia)"):
         ],
         MaxResults=1,
     )
-
-    product = json.loads(response["PriceList"][0])
-    price_dimensions = list(product["terms"]["OnDemand"].values())[0]["priceDimensions"]
-    price_per_hour = list(price_dimensions.values())[0]["pricePerUnit"]["USD"]
-    return float(price_per_hour)
+    product = json.loads(resp["PriceList"][0])
+    dims = list(product["terms"]["OnDemand"].values())[0]["priceDimensions"]
+    return float(list(dims.values())[0]["pricePerUnit"]["USD"])
 
 
-def get_rds_price(instance_class="db.t3.micro", region="US East (N. Virginia)"):
+def get_rds_price(instance_class="db.t3.micro",
+                  region="US East (N. Virginia)") -> float:
     pricing = boto3.client("pricing", region_name="us-east-1")
-
-    response = pricing.get_products(
+    resp = pricing.get_products(
         ServiceCode="AmazonRDS",
         Filters=[
             {"Type": "TERM_MATCH", "Field": "instanceType", "Value": instance_class},
@@ -36,20 +40,28 @@ def get_rds_price(instance_class="db.t3.micro", region="US East (N. Virginia)"):
         ],
         MaxResults=1,
     )
-
-    product = json.loads(response["PriceList"][0])
-    price_dimensions = list(product["terms"]["OnDemand"].values())[0]["priceDimensions"]
-    price_per_hour = list(price_dimensions.values())[0]["pricePerUnit"]["USD"]
-    return float(price_per_hour)
+    product = json.loads(resp["PriceList"][0])
+    dims = list(product["terms"]["OnDemand"].values())[0]["priceDimensions"]
+    return float(list(dims.values())[0]["pricePerUnit"]["USD"])
 
 
-if __name__ == "__main__":
+# ---------- exported API ----------
+def estimate_costs() -> None:
+    """
+    Prints a quick cost estimate for one EC2 (t2.micro) and one RDS (db.t3.micro)
+    running in US-EAST-1.
+    """
     ec2_price = get_ec2_price()
     rds_price = get_rds_price()
 
-    print(f"\n💰 Estimated Cost Breakdown (Per Hour):")
-    print(f"  - EC2 (t2.micro): ${ec2_price}/hour")
-    print(f"  - RDS (db.t3.micro, MySQL): ${rds_price}/hour")
+    print("\nEstimated Cost Breakdown (Per Hour):")
+    print(f"  - EC2 (t2.micro): ${ec2_price:.4f}/hour")
+    print(f"  - RDS (db.t3.micro, MySQL): ${rds_price:.4f}/hour")
 
-    monthly_cost = (ec2_price + rds_price) * 24 * 30
-    print(f"\n📦 Total Estimated Monthly Cost: ${monthly_cost:.2f}")
+    monthly = (ec2_price + rds_price) * 24 * 30
+    print(f"\nTotal Estimated Monthly Cost: ${monthly:.2f}")
+
+
+# ---------- CLI ----------
+if __name__ == "__main__":
+    estimate_costs()
