@@ -33,11 +33,17 @@ if st.button("Generate", type="primary"):
                 st.error(str(e))
                 st.stop()
 
+    # Display Terraform code
     st.subheader("📄 Terraform Configuration")
     st.code(terraform_code, language="hcl")
 
+    # Display Cost Estimate
     st.subheader("💰 Cost Estimate")
-    st.text(cost_output)
+    if cost_output:
+        st.code(cost_output)
+    else:
+        st.warning("No cost estimate returned.")
 
+    # Display GitHub push result
     st.subheader("🔗 GitHub Push")
     st.info(git_status)

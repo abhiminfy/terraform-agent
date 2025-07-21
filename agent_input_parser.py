@@ -46,7 +46,15 @@ def highlight_placeholders(terraform_code: str) -> str:
 def estimate_infracost() -> str:
     try:
         subprocess.run(["terraform", "init", "-input=false"], check=True)
-        subprocess.run(["terraform", "plan", "-out=tfplan.binary"], check=True)
+        
+        plan = subprocess.run(
+            ["terraform", "plan", "-out=tfplan.binary"],
+            capture_output=True,
+            text=True
+        )
+        if plan.returncode != 0:
+            return f"❌ terraform plan failed:\n{plan.stderr or plan.stdout}"
+
         subprocess.run(["terraform", "show", "-json", "tfplan.binary"], stdout=open("tfplan.json", "w"), check=True)
 
         result = subprocess.run(
@@ -56,10 +64,12 @@ def estimate_infracost() -> str:
             check=True
         )
         return result.stdout
+
     except subprocess.CalledProcessError as e:
         return f"❌ Infracost error:\n{e.stderr or str(e)}"
     except Exception as e:
         return f"❌ Unexpected error during cost estimation:\n{str(e)}"
+
 
 
 # ---------- 4. Push to GitHub ----------
@@ -93,9 +103,11 @@ def push_to_github() -> str:
 # ---------- 5. Parse User Prompt ----------
 def parse_user_input(user_prompt: str) -> tuple[str, str, str]:
     system_prompt = (
-        "You are an AI DevOps assistant. Generate strictly-valid HCL Terraform code only. "
-        "Do NOT include 'infracost' provider, CLI commands, markdown, or extra commentary. "
-        "Do NOT use resources that do not exist, like 'aws_security_group_association'."
+         "You are an expert Terraform DevOps assistant. "
+    "Only use valid Terraform HCL code. Avoid using unsupported resources like aws_security_group_association. "
+    "Use standard aws_* resources that are supported by the official AWS Terraform provider. "
+    "DO NOT wrap code in markdown ``` blocks. "
+    "Just return plain Terraform code."
     )
 
     # 🧹 Clean previous files
