@@ -6,7 +6,7 @@ import contextlib
 
 # Page setup
 st.set_page_config(page_title="Terraform AI Generator", layout="centered")
-st.title("🚀 Terraform AI Generator")
+st.title(" Terraform AI Generator")
 st.caption("Describe the infrastructure you need, get Terraform code, cost estimation, and GitHub auto-push.")
 
 # User input
@@ -18,12 +18,12 @@ user_prompt = st.text_area(
 
 if st.button("Generate", type="primary"):
     if not user_prompt.strip():
-        st.warning("⚠️ Please enter a prompt.")
+        st.warning(" Please enter a prompt.")
         st.stop()
 
     log_capture = io.StringIO()
 
-    with st.spinner("🧠 Generating Terraform, estimating cost & pushing to GitHub..."):
+    with st.spinner(" Generating Terraform, estimating cost & pushing to GitHub..."):
         with contextlib.redirect_stdout(log_capture):
             try:
                 terraform_code, cost_output, git_status = agent_input_parser.parse_user_input(user_prompt)
@@ -37,7 +37,7 @@ if st.button("Generate", type="primary"):
     st.code(terraform_code if terraform_code else "No code generated.", language="hcl")
 
     # Cost Estimate
-    st.subheader("💰 Cost Estimate")
+    st.subheader(" Cost Estimate")
     if cost_output and isinstance(cost_output, str) and cost_output.strip():
         st.code(cost_output)
     else:

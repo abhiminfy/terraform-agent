@@ -1,16 +1,27 @@
 
+# Terraform state and plan files
 .terraform/
 *.tfstate
-*.tfstate.backup
-.tfplan
+*.tfstate.*
 tfplan.*
 tfplan.json
+
+# Terraform provider binaries (avoid pushing 700MB+ files!)
+.terraform/**/*.exe
+.terraform/**/*.zip
+
+# Python files
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Virtual environments
 env/
 venv/
+
+# IDEs & OS
 .vscode/
 .DS_Store
 Thumbs.db
+

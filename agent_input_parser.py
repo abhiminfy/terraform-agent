@@ -7,24 +7,24 @@ from pathlib import Path
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-# ---------- 0. Load env & configure Gemini ----------
+# Load env & configure Gemini 
 load_dotenv()
 
 API_KEY = os.getenv("GOOGLE_API_KEY")
 if not API_KEY:
-    raise RuntimeError("❌ Missing GOOGLE_API_KEY in your .env file.")
+    raise RuntimeError(" Missing GOOGLE_API_KEY in your .env file.")
 
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel("gemini-1.5-pro")
 
 
-# ---------- 1. CLI dependency check ----------
+# CLI dependency check 
 def require_executable(name: str) -> None:
     if shutil.which(name) is None:
-        raise RuntimeError(f"❌ Required executable '{name}' not found. Please install it.")
+        raise RuntimeError(f" Required executable '{name}' not found. Please install it.")
 
 
-# ---------- 2. Placeholder patching ----------
+# Placeholder patching 
 def highlight_placeholders(terraform_code: str) -> str:
     substitutions = {
         r'ami\s*=\s*".+?"': 'ami = "ami-09ac0b140f63d3458"',
@@ -43,7 +43,7 @@ def highlight_placeholders(terraform_code: str) -> str:
     return terraform_code
 
 
-# ---------- 3. Infracost estimation ----------
+#  Infracost estimation 
 def estimate_infracost() -> str:
     require_executable("terraform")
     require_executable("infracost")
@@ -63,13 +63,13 @@ def estimate_infracost() -> str:
             encoding="utf-8"
         )
 
-        return result.stdout.strip() or "⚠️ Infracost returned empty output."
+        return result.stdout.strip() or " Infracost returned empty output."
 
     except subprocess.CalledProcessError as e:
-        return f"❌ Infracost error:\n{e.stderr or str(e)}"
+        return f" Infracost error:\n{e.stderr or str(e)}"
 
 
-# ---------- 4. Push to GitHub ----------
+# Push to GitHub
 def push_to_github() -> str:
     github_token = os.getenv("GITHUB_TOKEN")
     github_repo = os.getenv("GITHUB_REPO")
@@ -109,14 +109,14 @@ Thumbs.db
         subprocess.run(["git", "branch", "-M", "main"], check=True)
         subprocess.run(["git", "push", "-u", "origin", "main"], check=True)
 
-        return "✅ Code pushed successfully to GitHub."
+        return " Code pushed successfully to GitHub."
     except subprocess.CalledProcessError as e:
-        return f"❌ GitHub push failed:\n{e.stderr or str(e)}"
+        return f" GitHub push failed:\n{e.stderr or str(e)}"
     except Exception as e:
-        return f"❌ Unexpected Git push error:\n{str(e)}"
+        return f" Unexpected Git push error:\n{str(e)}"
 
 
-# ---------- 5. Parse User Prompt ----------
+# Parse User Prompt 
 def parse_user_input(user_prompt: str) -> tuple[str, str, str]:
     system_prompt = (
         "You are an expert Terraform DevOps assistant. "
@@ -165,6 +165,6 @@ def parse_user_input(user_prompt: str) -> tuple[str, str, str]:
         return cleaned_code, cost_output, git_output
 
     except Exception as e:
-        raise RuntimeError(f"❌ Error: {str(e)}")
+        raise RuntimeError(f" Error: {str(e)}")
 
 
