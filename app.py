@@ -1,77 +1,90 @@
 import os
 import streamlit as st
-import agent_input_parser  # your AI agent module
-import io
-import contextlib
-import google.generativeai as genai  # For chatbot-style replies
 from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
 
-# Initialize Gemini API
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-pro")
+# Safe import for agent logic
+try:
+    import agent_input_parser
+except ImportError as e:
+    st.error("❌ Failed to import agent_input_parser.py. Make sure it exists and contains `process_user_prompt()`.")
+    st.stop()
 
 # Streamlit page config
-st.set_page_config(page_title="Terraform AI Generator", layout="centered")
+st.set_page_config(page_title="Terraform AI Generator + Chatbot", layout="centered")
 st.title("🛠️ Terraform AI Generator + Chatbot")
-st.caption("Describe your infrastructure needs. The AI will respond like a chatbot, generate Terraform code, estimate costs, and push to GitHub.")
+st.caption("Talk freely. Ask general questions or describe your infra needs. The AI will respond smartly and generate Terraform scripts only when needed.")
 
-# Chat history
+# Session state for chat history
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# User prompt input
-user_prompt = st.chat_input("💬 Describe your infrastructure requirements...")
+# Chat input
+user_prompt = st.chat_input("💬 Ask anything or describe your infrastructure...")
 
+# Core logic
 if user_prompt:
     st.session_state.chat_history.append(("user", user_prompt))
 
-    # Show user message
     with st.chat_message("user"):
         st.markdown(user_prompt)
 
-    # Bot response using Gemini (chat-style)
     with st.chat_message("ai"):
         with st.spinner("💡 Thinking..."):
             try:
-                gemini_reply = model.generate_content(user_prompt).text
+                # Main processing function
+                if hasattr(agent_input_parser, "process_user_prompt"):
+                    result = agent_input_parser.process_user_prompt(user_prompt)
+                else:
+                    raise AttributeError("`process_user_prompt` not found in agent_input_parser.py")
+
+                # Terraform response
+                if result["type"] == "terraform":
+                    st.markdown("✅ Infrastructure prompt detected. Here's the response:")
+
+                    if result.get("terraform_code"):
+                        with st.expander("📄 Terraform Configuration"):
+                            st.code(result["terraform_code"], language="hcl")
+
+                    if result.get("cost_estimate"):
+                        with st.expander("💰 Cost Estimate"):
+                            st.code(result["cost_estimate"], language="bash")
+
+                    if result.get("github_status"):
+                        with st.expander("🔗 GitHub Push Status"):
+                            st.info(result["github_status"])
+
+                    ai_message = "Here's your Terraform configuration and deployment info. Let me know if you'd like to modify or expand it."
+                    st.markdown(ai_message)
+                    st.session_state.chat_history.append(("ai", ai_message))
+
+                # Clarification needed
+                elif result["type"] == "clarify":
+                    ai_message = "🤔 I need a bit more detail before generating infrastructure. Can you clarify?"
+                    st.markdown(ai_message)
+                    st.markdown(result["content"])
+                    st.session_state.chat_history.append(("ai", ai_message + "\n" + result["content"]))
+
+                # Regular AI chat
+                elif result["type"] == "chat":
+                    st.markdown(result["content"])
+                    st.session_state.chat_history.append(("ai", result["content"]))
+
+                # Error from parser
+                elif result["type"] == "error":
+                    st.error(f"❌ Error: {result['error']}")
+                    st.session_state.chat_history.append(("ai", f"❌ Error: {result['error']}"))
+
             except Exception as e:
-                gemini_reply = f"Error generating response: {str(e)}"
-            st.markdown(gemini_reply)
-            st.session_state.chat_history.append(("ai", gemini_reply))
+                error_msg = f"❌ Unexpected error: {str(e)}"
+                st.error(error_msg)
+                st.session_state.chat_history.append(("ai", error_msg))
 
-    # Backend processing: Terraform code generation, cost estimation, GitHub push
-    log_capture = io.StringIO()
-    with contextlib.redirect_stdout(log_capture):
-        try:
-            terraform_code, cost_output, git_status = agent_input_parser.parse_user_input(user_prompt)
-        except Exception as e:
-            terraform_code = ""
-            cost_output = ""
-            git_status = ""
-            st.error(f"❌ Error: {str(e)}")
-
-    # Terraform code
-    if terraform_code:
-        with st.expander("📄 Terraform Configuration"):
-            st.code(terraform_code, language="hcl")
-
-    # Cost estimation
-    if cost_output and isinstance(cost_output, str) and cost_output.strip():
-        with st.expander("💰 Cost Estimate"):
-            st.code(cost_output, language="bash")
-
-    # GitHub push status
-    if git_status:
-        with st.expander("🔗 GitHub Push Status"):
-            st.info(git_status)
-
-    # Debug logs
-    with st.expander("🐞 Debug Logs"):
-        st.text(log_capture.getvalue())
-
-# Show past chat
+# Display chat history
 for role, message in st.session_state.chat_history:
     with st.chat_message(role):
         st.markdown(message)
+
+

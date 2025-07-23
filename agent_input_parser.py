@@ -1,3 +1,4 @@
+# Full updated agent_input_parser.py
 import os
 import re
 import shutil
@@ -6,17 +7,26 @@ from pathlib import Path
 from dotenv import load_dotenv
 import google.generativeai as genai
 
-# Load .env
+# Load environment variables
 load_dotenv()
 API_KEY = os.getenv("GOOGLE_API_KEY")
 if not API_KEY:
     raise RuntimeError("Missing GOOGLE_API_KEY in your .env file.")
 
+# Configure the Gemini API
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
 chat = model.start_chat(history=[])
 
-# 1. Patch Default Values
+# Initial system message to guide the assistant
+chat.send_message("""
+You are an AI DevOps assistant. You:
+1. Act like a normal chatbot unless the user mentions infra/infrastructure or cloud deployment.
+2. When infra is requested, ask clarifying questions if the requirements are incomplete.
+3. Then generate clean Terraform code based on the user's clarified needs.
+""")
+
+# Highlight/patch sensitive values in Terraform
 def highlight_placeholders(terraform_code: str) -> str:
     substitutions = {
         r'ami\s*=\s*".+?"': 'ami = "ami-09ac0b140f63d3458"',
@@ -34,41 +44,38 @@ def highlight_placeholders(terraform_code: str) -> str:
         terraform_code = re.sub(pattern, replacement, terraform_code)
     return terraform_code
 
-# 2. Cost Estimate
-def require_executable(name: str) -> None:
-    if shutil.which(name) is None:
-        raise RuntimeError(f"Required executable '{name}' not found. Please install it.")
+# Extract Terraform code from AI response
+def extract_terraform_code(response_text: str) -> str:
+    matches = re.findall(r"```(?:terraform|hcl)?\n(.*?)```", response_text, re.DOTALL)
+    if matches:
+        return matches[0].strip()
+    return re.sub(r"[*`#>]", "", response_text).strip()
 
+# Estimate cost using Infracost
 def estimate_infracost() -> str:
-    require_executable("terraform")
-    require_executable("infracost")
+    for exe in ["terraform", "infracost"]:
+        if shutil.which(exe) is None:
+            raise RuntimeError(f"Required executable '{exe}' not found. Please install it.")
 
-    try:
-        subprocess.run(["terraform", "init", "-input=false"], check=True)
-        subprocess.run(["terraform", "plan", "-out=tfplan.binary"], check=True)
+    subprocess.run(["terraform", "init", "-input=false"], check=True)
+    subprocess.run(["terraform", "plan", "-out=tfplan.binary"], check=True)
 
-        with open("tfplan.json", "w", encoding="utf-8") as f:
-            subprocess.run(["terraform", "show", "-json", "tfplan.binary"], stdout=f, check=True)
+    with open("tfplan.json", "w", encoding="utf-8") as f:
+        subprocess.run(["terraform", "show", "-json", "tfplan.binary"], stdout=f, check=True)
 
-        result = subprocess.run(
-            ["infracost", "breakdown", "--path=tfplan.json", "--format=table"],
-            capture_output=True,
-            text=True,
-            check=True,
-            encoding="utf-8",
-            errors="replace"
-        )
+    result = subprocess.run(
+        ["infracost", "breakdown", "--path=tfplan.json", "--format=table"],
+        capture_output=True, text=True, check=True
+    )
 
-        return result.stdout.strip() if result.stdout else "Infracost returned empty output."
-    except subprocess.CalledProcessError as e:
-        return f"Infracost error:\n{e.stderr or str(e)}"
+    return result.stdout.strip() if result.stdout else "Infracost returned empty output."
 
-# 3. GitHub Push
+# Push Terraform code to GitHub
 def push_to_github() -> str:
     github_token = os.getenv("GITHUB_TOKEN")
     github_repo = os.getenv("GITHUB_REPO")
     if not github_token or not github_repo:
-        return "GitHub push skipped: Missing GITHUB_TOKEN or GITHUB_REPO in .env"
+        return "GitHub push skipped: Missing GITHUB_TOKEN or GITHUB_REPO"
 
     repo_url = f"https://{github_token}@github.com/{github_repo}.git"
 
@@ -106,93 +113,47 @@ Thumbs.db
     except Exception as e:
         return f"GitHub push failed:\n{str(e)}"
 
-# 4. One-shot (non-chat) Generator
-def parse_user_input(user_prompt: str) -> tuple[str, str, str]:
-    system_prompt = (
-        "You are an expert Terraform DevOps assistant. "
-        "Only use valid Terraform HCL code. Avoid using unsupported resources like aws_security_group_association. "
-        "Use standard aws_* resources that are supported by the official AWS Terraform provider. "
-        "DO NOT wrap code in markdown blocks. Just return plain Terraform code."
+# Identify if user prompt is infra-related
+def is_infra_prompt(user_prompt: str) -> bool:
+    keywords = ["infrastructure", "terraform", "vpc", "ec2", "s3", "rds", "alb", "cloud setup", "provision"]
+    return any(k in user_prompt.lower() for k in keywords)
+
+# Generate follow-up clarification questions
+def ask_for_clarity(user_prompt: str) -> str:
+    clarify_prompt = (
+        "You are a helpful cloud infrastructure assistant. "
+        f"If the user prompt is vague, ask 2-3 follow-up questions to clarify:\n\nPrompt: {user_prompt}\n\n"
+        "Return only numbered questions."
     )
+    response = model.generate_content(clarify_prompt)
+    return response.text.strip()
 
-    for f in Path(".").glob(".terraform*"):
-        shutil.rmtree(f, ignore_errors=True) if f.is_dir() else f.unlink(missing_ok=True)
-    for f in ("terraform.tfstate", "terraform.tfstate.backup", "main.tf", "tfplan.binary", "tfplan.json"):
-        Path(f).unlink(missing_ok=True)
-
-    require_executable("terraform")
-    require_executable("infracost")
-    require_executable("git")
-
+# MAIN handler
+def process_user_prompt(user_prompt: str) -> dict:
     try:
-        response = model.generate_content([{"role": "user", "parts": [system_prompt + "\n" + user_prompt]}])
-        raw_code = response.text
+        if is_infra_prompt(user_prompt):
+            infra_response = model.generate_content(user_prompt).text
+            raw_code = extract_terraform_code(infra_response)
 
-        raw_code = re.sub(r"```(?:terraform|hcl)?\n(.*?)```", r"\1", raw_code, flags=re.DOTALL).strip()
-        raw_code = raw_code.split("```")[0].strip()
-        raw_code = re.sub(r'resource\s+"aws_security_group_association".*?\{.*?\}\n?', "", raw_code, flags=re.DOTALL)
+            if not re.search(r'\bresource\b|\bprovider\b|\bmodule\b', raw_code):
+                questions = ask_for_clarity(user_prompt)
+                return {"type": "clarify", "content": questions}
 
-        if "aws_default_vpc" in raw_code and 'resource "aws_default_vpc"' not in raw_code:
-            raw_code = 'resource "aws_default_vpc" "default" {}\n\n' + raw_code
+            final_code = highlight_placeholders(raw_code)
+            Path("main.tf").write_text(final_code, encoding="utf-8")
+            cost = estimate_infracost()
+            git_result = push_to_github()
 
-        cleaned_code = highlight_placeholders(raw_code)
-        Path("main.tf").write_text(cleaned_code, encoding="utf-8")
+            return {
+                "type": "terraform",
+                "terraform_code": final_code,
+                "cost_estimate": cost,
+                "github_status": git_result
+            }
 
-        cost_output = estimate_infracost()
-        git_output = push_to_github()
-
-        return cleaned_code, cost_output, git_output
+        else:
+            general_reply = model.generate_content(user_prompt).text.strip()
+            return {"type": "chat", "content": general_reply}
 
     except Exception as e:
-        raise RuntimeError(f"Error: {str(e)}")
-
-# 5. Chatbot Mode
-def smart_chatbot_agent() -> None:
-    print("🤖 DevOps AI Assistant Ready. Ask anything about Terraform, Infra, or DevOps!\n(Type 'exit' to quit)\n")
-
-    system_instruction = (
-        "You are a helpful and expert DevOps assistant. "
-        "You can answer general DevOps questions OR generate Terraform code. "
-        "ONLY output valid Terraform HCL code if you're confident the user is asking for infrastructure generation. "
-        "NEVER include markdown formatting like ``` or `terraform`. Just return plain code or plain text."
-    )
-    chat.send_message(system_instruction)
-
-    while True:
-        user_prompt = input("\n👤 You: ").strip()
-        if user_prompt.lower() in {"exit", "quit"}:
-            print("👋 Exiting chatbot.")
-            break
-
-        try:
-            chat.send_message(user_prompt)
-            reply = chat.last.text.strip()
-
-            # Determine if reply is code (by structure)
-            is_terraform_code = (
-                reply.lower().startswith("resource") or
-                "provider" in reply or
-                "terraform {" in reply
-            )
-
-            if is_terraform_code:
-                print("\n✅ Terraform code detected. Processing...\n")
-
-                final_code = re.sub(r"```(?:terraform|hcl)?\n(.*?)```", r"\1", reply, flags=re.DOTALL).strip()
-                final_code = final_code.split("```")[0].strip()
-                cleaned_code = highlight_placeholders(final_code)
-
-                Path("main.tf").write_text(cleaned_code, encoding="utf-8")
-                print("📝 Terraform code written to main.tf")
-
-                cost_output = estimate_infracost()
-                print("\n💸 Infracost Estimate:\n", cost_output)
-
-                git_output = push_to_github()
-                print("\n📤 GitHub Status:\n", git_output)
-
-            else:
-                print(f"\n🤖 Gemini: {reply}")
-
-        except Exception as e:
-            print(f"\n❌ Error: {str(e)}")
+        return {"type": "error", "error": str(e)}
