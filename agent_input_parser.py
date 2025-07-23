@@ -16,7 +16,6 @@ genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel("gemini-1.5-pro")
 chat = model.start_chat(history=[])
 
-
 # 1. Patch Default Values
 def highlight_placeholders(terraform_code: str) -> str:
     substitutions = {
@@ -34,7 +33,6 @@ def highlight_placeholders(terraform_code: str) -> str:
     for pattern, replacement in substitutions.items():
         terraform_code = re.sub(pattern, replacement, terraform_code)
     return terraform_code
-
 
 # 2. Cost Estimate
 def require_executable(name: str) -> None:
@@ -57,18 +55,13 @@ def estimate_infracost() -> str:
             capture_output=True,
             text=True,
             check=True,
-            encoding="utf-8",  # Ensures proper decoding
-            errors="replace"   # Avoids crashing on weird symbols
+            encoding="utf-8",
+            errors="replace"
         )
 
-        if result.stdout:
-            return result.stdout.strip()
-        else:
-            return "Infracost returned empty output."
-
+        return result.stdout.strip() if result.stdout else "Infracost returned empty output."
     except subprocess.CalledProcessError as e:
         return f"Infracost error:\n{e.stderr or str(e)}"
-
 
 # 3. GitHub Push
 def push_to_github() -> str:
@@ -109,10 +102,9 @@ Thumbs.db
         subprocess.run(["git", "branch", "-M", "main"], check=True)
         subprocess.run(["git", "push", "-u", "origin", "main"], check=True)
 
-        return " Code pushed successfully to GitHub."
+        return "✅ Code pushed successfully to GitHub."
     except Exception as e:
         return f"GitHub push failed:\n{str(e)}"
-
 
 # 4. One-shot (non-chat) Generator
 def parse_user_input(user_prompt: str) -> tuple[str, str, str]:
@@ -123,7 +115,6 @@ def parse_user_input(user_prompt: str) -> tuple[str, str, str]:
         "DO NOT wrap code in markdown blocks. Just return plain Terraform code."
     )
 
-    # Clean
     for f in Path(".").glob(".terraform*"):
         shutil.rmtree(f, ignore_errors=True) if f.is_dir() else f.unlink(missing_ok=True)
     for f in ("terraform.tfstate", "terraform.tfstate.backup", "main.tf", "tfplan.binary", "tfplan.json"):
@@ -155,37 +146,53 @@ def parse_user_input(user_prompt: str) -> tuple[str, str, str]:
     except Exception as e:
         raise RuntimeError(f"Error: {str(e)}")
 
+# 5. Chatbot Mode
+def smart_chatbot_agent() -> None:
+    print("🤖 DevOps AI Assistant Ready. Ask anything about Terraform, Infra, or DevOps!\n(Type 'exit' to quit)\n")
 
-# 5. Chatbot Mode (New)
-def smart_chatbot_agent(user_prompt: str) -> tuple[str, str, str]:
     system_instruction = (
-        "You are a DevOps Terraform assistant.\n"
-        "Ask questions to clarify when needed.\n"
-        "When you are confident, respond with ONLY Terraform HCL code.\n"
-        "Do not use markdown blocks or prose.\n"
-        "Only output Terraform when you’re ready."
+        "You are a helpful and expert DevOps assistant. "
+        "You can answer general DevOps questions OR generate Terraform code. "
+        "ONLY output valid Terraform HCL code if you're confident the user is asking for infrastructure generation. "
+        "NEVER include markdown formatting like ``` or `terraform`. Just return plain code or plain text."
     )
     chat.send_message(system_instruction)
 
-    # Step 1: Initial user input
-    chat.send_message(user_prompt)
+    while True:
+        user_prompt = input("\n👤 You: ").strip()
+        if user_prompt.lower() in {"exit", "quit"}:
+            print("👋 Exiting chatbot.")
+            break
 
-    for _ in range(5):  # max 5 rounds of Q&A
-        response = chat.last.text.strip()
-        if response.lower().startswith("resource") or "provider" in response:
-            # Seems like Terraform code
-            final_code = re.sub(r"```(?:terraform|hcl)?\n(.*?)```", r"\1", response, flags=re.DOTALL).strip()
-            final_code = final_code.split("```")[0].strip()
-            cleaned_code = highlight_placeholders(final_code)
-            Path("main.tf").write_text(cleaned_code, encoding="utf-8")
-            cost_output = estimate_infracost()
-            git_output = push_to_github()
-            return cleaned_code, cost_output, git_output
-        else:
-            # Still asking clarification
-            print(" Gemini wants clarification:", response)
-            user_reply = input(" Your reply: ")
-            chat.send_message(user_reply)
+        try:
+            chat.send_message(user_prompt)
+            reply = chat.last.text.strip()
 
-    raise RuntimeError("Conversation did not result in Terraform code. Try rephrasing.")
+            # Determine if reply is code (by structure)
+            is_terraform_code = (
+                reply.lower().startswith("resource") or
+                "provider" in reply or
+                "terraform {" in reply
+            )
 
+            if is_terraform_code:
+                print("\n✅ Terraform code detected. Processing...\n")
+
+                final_code = re.sub(r"```(?:terraform|hcl)?\n(.*?)```", r"\1", reply, flags=re.DOTALL).strip()
+                final_code = final_code.split("```")[0].strip()
+                cleaned_code = highlight_placeholders(final_code)
+
+                Path("main.tf").write_text(cleaned_code, encoding="utf-8")
+                print("📝 Terraform code written to main.tf")
+
+                cost_output = estimate_infracost()
+                print("\n💸 Infracost Estimate:\n", cost_output)
+
+                git_output = push_to_github()
+                print("\n📤 GitHub Status:\n", git_output)
+
+            else:
+                print(f"\n🤖 Gemini: {reply}")
+
+        except Exception as e:
+            print(f"\n❌ Error: {str(e)}")
