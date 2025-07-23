@@ -1,65 +1,29 @@
-# VPC and Subnets
+# Configure the AWS Provider
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
 
+
+}
+
+provider "aws" {
+  region = "us-west-2" # Replace with your desired region
+}
+
+# Create a VPC
 resource "aws_vpc" "main" {
   cidr_block = "10.0.0.0/16"
-  enable_dns_hostnames = true
-  enable_dns_support   = true
 
   tags = {
     Name = "main-vpc"
   }
 }
 
-resource "aws_subnet" "public_1" {
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.1.0/24"
-  availability_zone = data.aws_availability_zones.available.names[0]
-
-  tags = {
-    Name = "public-subnet-1"
-  }
-
-}
-
-resource "aws_subnet" "public_2" {
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.2.0/24"
-  availability_zone = data.aws_availability_zones.available.names[1]
-
-  tags = {
-    Name = "public-subnet-2"
-  }
-}
-
-
-resource "aws_subnet" "private_1" {
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.10.0/24"
-  availability_zone = data.aws_availability_zones.available.names[0]
-
-  tags = {
-    Name = "private-subnet-1"
-  }
-}
-
-
-resource "aws_subnet" "private_2" {
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.20.0/24"
-  availability_zone = data.aws_availability_zones.available.names[1]
-
-  tags = {
-    Name = "private-subnet-2"
-  }
-}
-
-
-data "aws_availability_zones" "available" {}
-
-
-
-# Internet Gateway and Route Table
-
+# Create an internet gateway
 resource "aws_internet_gateway" "gw" {
   vpc_id = aws_vpc.main.id
 
@@ -68,12 +32,25 @@ resource "aws_internet_gateway" "gw" {
   }
 }
 
-resource "aws_route_table" "public" {
+# Create a public subnet
+resource "aws_subnet" "public" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.0.1.0/24"
+  availability_zone = data.aws_availability_zones.available.names[0] # Use the first available AZ
+
+  tags = {
+    Name = "public-subnet"
+  }
+}
+
+
+# Create a route table
+resource "aws_route_table" "public_route_table" {
   vpc_id = aws_vpc.main.id
 
   route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.gw.id
+    cidr_block        = "0.0.0.0/0"
+    gateway_id        = aws_internet_gateway.gw.id
   }
 
   tags = {
@@ -81,215 +58,85 @@ resource "aws_route_table" "public" {
   }
 }
 
-
-
-resource "aws_route_table_association" "public_1" {
-  subnet_id      = aws_subnet.public_1.id
-  route_table_id = aws_route_table.public.id
-}
-
-resource "aws_route_table_association" "public_2" {
-  subnet_id      = aws_subnet.public_2.id
-  route_table_id = aws_route_table.public.id
+# Associate the route table with the subnet
+resource "aws_route_table_association" "public_subnet_association" {
+ subnet_id      = aws_subnet.public.id
+ route_table_id = aws_route_table.public_route_table.id
 }
 
 
 
-# Database (RDS)
+# Get available availability zones
+data "aws_availability_zones" "available" {}
 
-resource "aws_db_subnet_group" "default" {
-  name       = "main-db-subnet-group"
-  subnet_ids = [aws_subnet.private_1.id, aws_subnet.private_2.id]
-
-  tags = {
-    Name = "main-rds-subnet-group"
-  }
-}
-
-resource "aws_db_instance" "default" {
-  identifier = "terraform-mysql-db"
-  allocated_storage      = 20  # Adjust as needed
-  storage_type           = "gp2" # Or provisioned IOPS for better performance
-  engine                = "mysql" # or postgres
-  engine_version        = "8.0"  # Adjust as needed
-  instance_class         = "db.t3.micro" # Choose an instance class suitable for your workload
-  username = "adminuser"  # Replace with your desired username
-  password = "MyS3cur3P@ssw0rd!" # Replace with a strong password
-  db_subnet_group_name  = aws_db_subnet_group.default.name
-  skip_final_snapshot    = true
-  vpc_security_group_ids = ["sg-xxxxxx"]
-
-  tags = {
-    Name = "main-rds-instance"
-  }
-
-}
-
-
-
-
-# Security Groups
-
-resource "aws_security_group" "web_sg" {
-  name        = "web-sg"
-  description = "Allow HTTP access"
+# Create a security group
+resource "aws_security_group" "allow_ssh" {
+  name        = "allow_ssh"
+  description = "Allow SSH inbound traffic"
   vpc_id      = aws_vpc.main.id
 
  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] #  Restrict this if possible after testing.
+    description      = "SSH from Anywhere"
+    from_port        = 22
+    to_port          = 22
+    protocol         = "tcp"
+    cidr_blocks      = ["0.0.0.0/0"] #  Restrict this in production
   }
-
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # Restrict this if possible after testing.
-  }
-
 
   egress {
-    from_port        = 0
-    to_port          = 0
+    from_port       = 0
+    to_port         = 0
     protocol        = "-1"
-    cidr_blocks      = ["0.0.0.0/0"]
+    cidr_blocks     = ["0.0.0.0/0"]
     ipv6_cidr_blocks = ["::/0"]
   }
 
-
   tags = {
-    Name = "allow_http"
+    Name = "allow_ssh"
   }
 }
 
 
 
-resource "aws_security_group" "rds_sg" {
-  name        = "rds-sg"
-  description = "Allow inbound traffic from web servers"
-  vpc_id      = aws_vpc.main.id
-
-
-  ingress {
- from_port   = 3306 # MySQL default port, adjust for other databases
-    to_port     = 3306
-    protocol    = "tcp"
-    security_groups = [aws_security_group.web_sg.id]
-  }
-
-
-
-  egress {
-    from_port        = 0
-    to_port          = 0
-    protocol        = "-1"
-    cidr_blocks      = ["0.0.0.0/0"]
-    ipv6_cidr_blocks = ["::/0"]
-  }
-
-  tags = {
-    Name = "allow_web_to_rds"
-  }
-
-}
-
-
-
-
-
-
-
-
-
-# EC2 Instance (Web Server)
-
-resource "aws_instance" "web" {
-  ami                         = data.aws_ami.amazon_linux_2_latest.id  # Replace with your preferred AMI
-  instance_type               = "t2.medium"  # Or another suitable instance type, t3.medium, t3.large, etc. based on your needs.
-  count = 2 # 2 instances for high availability
-  subnet_id                   = aws_subnet.public_1.id # Place one instance in each public subnet
+# Create an EC2 instance
+resource "aws_instance" "example" {
+  ami           = data.aws_ami.amazon_linux_2.id # Use the latest Amazon Linux 2 AMI
+  instance_type = "t2.micro"
+  subnet_id     = aws_subnet.public.id
   vpc_security_group_ids = ["sg-xxxxxx"]
-  associate_public_ip_address = true
-
-  user_data = <<-EOF
-#!/bin/bash
-sudo yum update -y
-sudo yum install httpd -y
-sudo systemctl start httpd
-sudo systemctl enable httpd
-echo "Hello World from $(hostname -f)" > /var/www/html/index.html
-  EOF
-
-
+  key_name = "terraform-key" # Replace with the name of your existing key pair
 
   tags = {
-    Name = "web-server"
+    Name = "example-instance"
   }
+ user_data = <<-EOT
+#!/bin/bash
+yum update -y
+EOT
 
 }
 
-data "aws_ami" "amazon_linux_2_latest" {
+
+
+# Retrieve the latest Amazon Linux 2 AMI
+data "aws_ami" "amazon_linux_2" {
   most_recent = true
   owners      = ["amazon"]
 
   filter {
     name   = "name"
-    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+    values = ["amzn2-ami-hvm*"]
   }
-}
 
-
-
-
-# Load Balancer 
-
-resource "aws_lb" "example" {
-  internal           = false
-  load_balancer_type = "application" # Use "application" for HTTP/HTTPS
-  name               = "example-lb"
-
-  security_groups = [aws_security_group.web_sg.id]
-
-
- subnets = [aws_subnet.public_1.id,aws_subnet.public_2.id]
-
-}
-
-resource "aws_lb_target_group" "example" {
-  name        = "example-target-group"
-  port        = 80
-  protocol    = "HTTP"
-  vpc_id      = aws_vpc.main.id
-  target_type = "instance" # Target EC2 instances
- health_check {
-    path                = "/"  # Path to check
-    protocol            = "HTTP"
-    matcher             = "200" # Expected status code
-    interval            = 30 # Check interval in seconds
-    timeout             = 5 # Timeout in seconds
-    healthy_threshold   = 2 # Number of consecutive successes 
-    unhealthy_threshold = 2 # Number of consecutive failures
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
   }
-}
 
-resource "aws_lb_listener" "example" {
-  load_balancer_arn = aws_lb.example.arn
-  port              = "80" # Listener port
-  protocol          = "HTTP"  # Listener protocol
- default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.example.arn
+  filter {
+    name = "architecture"
+ values = ["x86_64"]
   }
-}
 
 
-
-
-resource "aws_lb_target_group_attachment" "example" {
-  count            = length(aws_instance.web)
-  target_group_arn = aws_lb_target_group.example.arn
-  target_id        = aws_instance.web[count.index].id
-  port             = 80
 }
