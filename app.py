@@ -14,27 +14,30 @@ except ImportError:
 
 # Streamlit page config
 st.set_page_config(page_title="Terraform AI Generator + Chatbot", layout="centered")
-st.title("Terraform AI ")
+st.title("Terraform AI")
 st.caption("Talk freely. Ask general questions or describe your infra needs. The AI will respond smartly and generate Terraform scripts only when needed.")
 
 # Session state for chat history
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# User input
+# Chat input
 user_prompt = st.chat_input("💬 Ask anything or describe your infrastructure...")
 
-# Handle new input
+# When user enters a message
 if user_prompt:
-    # Append and show user message
     st.session_state.chat_history.append(("user", user_prompt))
 
-    # Get response from agent
     try:
         if hasattr(agent_input_parser, "process_user_prompt"):
             result = agent_input_parser.process_user_prompt(user_prompt)
         else:
             raise AttributeError("`process_user_prompt()` not found in agent_input_parser.py")
+
+        # Optional: show "what agent is thinking"
+        agent_thoughts = result.get("agent_thoughts", "")
+        if agent_thoughts:
+            st.session_state.chat_history.append(("ai", f" **Agent Thinking:**\n> {agent_thoughts}"))
 
         response_type = result.get("type")
 
@@ -45,7 +48,6 @@ if user_prompt:
             github_status = result.get("github_status", "")
 
             ai_detailed_msg = ai_message
-
             if terraform_code:
                 ai_detailed_msg += "\n\n**📄 Terraform Configuration:**\n```hcl\n" + terraform_code + "\n```"
             if cost_estimate:
@@ -57,8 +59,7 @@ if user_prompt:
 
         elif response_type == "clarify":
             clarification = result.get("content", "")
-            ai_message = "🤔 I need a bit more detail before generating infrastructure.\n" + clarification
-            st.session_state.chat_history.append(("ai", ai_message))
+            st.session_state.chat_history.append(("ai", f"🤔 I need a bit more detail:\n{clarification}"))
 
         elif response_type == "chat":
             content = result.get("content", "I'm here to help!")
@@ -75,7 +76,7 @@ if user_prompt:
         error_msg = f"❌ Unexpected error: {str(e)}"
         st.session_state.chat_history.append(("ai", error_msg))
 
-# Display chat history (older at top, newer at bottom)
+# Display chat history
 for role, message in st.session_state.chat_history:
     with st.chat_message(role):
         st.markdown(message)

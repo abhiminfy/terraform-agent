@@ -4,6 +4,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from dotenv import load_dotenv
+from typing import Tuple  #  Added for thinking trace
 import google.generativeai as genai
 
 # Load environment variables
@@ -104,26 +105,22 @@ Thumbs.db
     except Exception as e:
         return f"GitHub push failed: {str(e)}"
 
-# 🔧 Smarter infrastructure prompt detection
+#  Detect infrastructure intent
 def is_infra_prompt(user_prompt: str) -> bool:
     user_prompt_lower = user_prompt.lower()
-
-    # Only trigger if intent to build or deploy infra
     keywords = ["vpc", "ec2", "s3", "rds", "alb", "cloud setup", "provision", "infrastructure"]
-    action_verbs = ["create", "build", "setup", "provision", "deploy", "generate", "spin up"]
+    verbs = ["create", "build", "setup", "provision", "deploy", "generate", "spin up"]
 
-    # Looks like an intent to create infra
     if any(k in user_prompt_lower for k in keywords):
-        if any(v in user_prompt_lower for v in action_verbs):
+        if any(v in user_prompt_lower for v in verbs):
             return True
 
-    # Special case: terraform mentioned + action intent
-    if "terraform" in user_prompt_lower and any(v in user_prompt_lower for v in action_verbs):
+    if "terraform" in user_prompt_lower and any(v in user_prompt_lower for v in verbs):
         return True
 
     return False
 
-# Ask for missing infra details
+#  Ask for missing details
 def ask_for_clarity(user_prompt: str) -> str:
     clarify_prompt = (
         "You are a helpful DevOps assistant. If the user prompt is vague, ask 2–3 clarification questions.\n\n"
@@ -132,7 +129,39 @@ def ask_for_clarity(user_prompt: str) -> str:
     resp = model.generate_content(clarify_prompt)
     return resp.text.strip() if hasattr(resp, "text") else "Could not generate clarification questions."
 
-# Main interface to the chatbot
+#  Generate agent reasoning + response
+def get_reasoned_response(user_prompt: str) -> Tuple[str, str]:
+    reason_prompt = f"""
+You are a Terraform AI assistant.
+
+When given a task, first explain your reasoning step-by-step (like you're thinking out loud).
+Then generate the final answer.
+
+User prompt: {user_prompt}
+
+Respond in this format exactly:
+
+THINKING:
+<your reasoning>
+
+FINAL RESPONSE:
+<final output, such as Terraform code or answer>
+"""
+    response = model.generate_content(reason_prompt)
+    full_text = response.text.strip()
+
+    thinking = "Could not extract reasoning."
+    final = "Could not extract final output."
+
+    if "FINAL RESPONSE:" in full_text:
+        thinking = full_text.split("FINAL RESPONSE:")[0].replace("THINKING:", "").strip()
+        final = full_text.split("FINAL RESPONSE:")[1].strip()
+    else:
+        final = full_text
+
+    return thinking, final
+
+#  Main processing function
 def process_user_prompt(user_prompt: str) -> dict:
     try:
         user_prompt = user_prompt.strip() if user_prompt else ""
@@ -140,14 +169,16 @@ def process_user_prompt(user_prompt: str) -> dict:
             return {"type": "error", "error": "Prompt is empty."}
 
         if is_infra_prompt(user_prompt):
-            response = model.generate_content(user_prompt)
-            if not hasattr(response, "text") or not response.text:
-                raise RuntimeError("No response from LLM.")
-            raw_code = extract_terraform_code(response.text)
+            thinking_trace, model_response = get_reasoned_response(user_prompt)
+            raw_code = extract_terraform_code(model_response)
 
             if not re.search(r'\bresource\b|\bprovider\b|\bmodule\b', raw_code, re.IGNORECASE):
                 questions = ask_for_clarity(user_prompt)
-                return {"type": "clarify", "content": questions}
+                return {
+                    "type": "clarify",
+                    "content": questions,
+                    "thinking_trace": thinking_trace
+                }
 
             final_code = highlight_placeholders(raw_code)
             Path("main.tf").write_text(final_code, encoding="utf-8")
@@ -158,13 +189,17 @@ def process_user_prompt(user_prompt: str) -> dict:
                 "type": "terraform",
                 "terraform_code": final_code,
                 "cost_estimate": cost,
-                "github_status": git_result
+                "github_status": git_result,
+                "thinking_trace": thinking_trace
             }
 
         else:
-            response = model.generate_content(user_prompt)
-            reply = response.text.strip() if hasattr(response, "text") else "I couldn't generate a response."
-            return {"type": "chat", "content": reply}
+            thinking_trace, reply = get_reasoned_response(user_prompt)
+            return {
+                "type": "chat",
+                "content": reply,
+                "thinking_trace": thinking_trace
+            }
 
     except Exception as e:
         return {"type": "error", "error": str(e)}
