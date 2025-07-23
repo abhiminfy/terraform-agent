@@ -14,7 +14,7 @@ except ImportError:
 
 # Streamlit page config
 st.set_page_config(page_title="Terraform AI Generator + Chatbot", layout="centered")
-st.title("🛠️ Terraform AI Generator + Chatbot")
+st.title("Terraform AI ")
 st.caption("Talk freely. Ask general questions or describe your infra needs. The AI will respond smartly and generate Terraform scripts only when needed.")
 
 # Session state for chat history
