@@ -104,10 +104,24 @@ Thumbs.db
     except Exception as e:
         return f"GitHub push failed: {str(e)}"
 
-# Determine if it's an infrastructure-related prompt
+# 🔧 Smarter infrastructure prompt detection
 def is_infra_prompt(user_prompt: str) -> bool:
-    keywords = ["infrastructure", "terraform", "vpc", "ec2", "s3", "rds", "alb", "cloud setup", "provision"]
-    return any(k in user_prompt.lower() for k in keywords)
+    user_prompt_lower = user_prompt.lower()
+
+    # Only trigger if intent to build or deploy infra
+    keywords = ["vpc", "ec2", "s3", "rds", "alb", "cloud setup", "provision", "infrastructure"]
+    action_verbs = ["create", "build", "setup", "provision", "deploy", "generate", "spin up"]
+
+    # Looks like an intent to create infra
+    if any(k in user_prompt_lower for k in keywords):
+        if any(v in user_prompt_lower for v in action_verbs):
+            return True
+
+    # Special case: terraform mentioned + action intent
+    if "terraform" in user_prompt_lower and any(v in user_prompt_lower for v in action_verbs):
+        return True
+
+    return False
 
 # Ask for missing infra details
 def ask_for_clarity(user_prompt: str) -> str:

@@ -3,9 +3,11 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0" # Or a specific version
+      version = "~> 4.0"
     }
   }
+
+  required_version = ">= 1.2.0"
 }
 
 provider "aws" {
@@ -18,70 +20,65 @@ resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_support   = true
   enable_dns_hostnames = true
-
   tags = {
-    Name = "my-vpc"
+    Name = "main-vpc"
   }
 }
 
-# Create an Internet Gateway
+
+# Create an internet gateway
 resource "aws_internet_gateway" "gw" {
   vpc_id = aws_vpc.main.id
-
   tags = {
-    Name = "my-igw"
-  }
-}
-
-# Create Public Subnets
-resource "aws_subnet" "public1" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
-  availability_zone = "us-east-1a"
-  map_public_ip_on_launch = true # Assign public IPs automatically
-
-  tags = {
-    Name = "public1-subnet"
-  }
-}
-
-resource "aws_subnet" "public2" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.2.0/24"
-  availability_zone = "us-east-1a"
-  map_public_ip_on_launch = true
-
-  tags = {
-    Name = "public2-subnet"
+    Name = "main-igw"
   }
 }
 
 
-# Create Private Subnets
-resource "aws_subnet" "private1" {
+# Create public subnets
+resource "aws_subnet" "public_subnet_1" {
   vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.101.0/24"
+  cidr_block        = "10.0.1.0/24"
   availability_zone = "us-east-1a"
-
   tags = {
-    Name = "private1-subnet"
+    Name = "public-subnet-1"
   }
 }
 
-
-resource "aws_subnet" "private2" {
+resource "aws_subnet" "public_subnet_2" {
   vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.102.0/24"
-  availability_zone = "us-east-1a"
-
+  cidr_block        = "10.0.2.0/24"
+  availability_zone = "us-east-1a" # Use a different AZ for redundancy
   tags = {
-    Name = "private2-subnet"
+    Name = "public-subnet-2"
   }
 }
 
 
 
-# Create a Public Route Table
+# Create private subnets
+resource "aws_subnet" "private_subnet_1" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.0.10.0/24"
+  availability_zone = "us-east-1a"
+  tags = {
+    Name = "private-subnet-1"
+  }
+}
+
+
+resource "aws_subnet" "private_subnet_2" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.0.20.0/24"
+  availability_zone = "us-east-1a" # Use a different AZ for redundancy
+  tags = {
+    Name = "private-subnet-2"
+  }
+}
+
+
+
+# Create public route table and associate it with the public subnets
 resource "aws_route_table" "public_route_table" {
   vpc_id = aws_vpc.main.id
 
@@ -89,42 +86,44 @@ resource "aws_route_table" "public_route_table" {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.gw.id
   }
-
-  tags = {
+    tags = {
     Name = "public-route-table"
   }
 }
 
 
-# Associate Public Subnets with the Public Route Table
-resource "aws_route_table_association" "public1_assoc" {
-  subnet_id      = aws_subnet.public1.id
+resource "aws_route_table_association" "public_subnet_1_association" {
+  subnet_id      = aws_subnet.public_subnet_1.id
   route_table_id = aws_route_table.public_route_table.id
 }
 
-resource "aws_route_table_association" "public2_assoc" {
-  subnet_id      = aws_subnet.public2.id
+resource "aws_route_table_association" "public_subnet_2_association" {
+  subnet_id      = aws_subnet.public_subnet_2.id
   route_table_id = aws_route_table.public_route_table.id
 }
 
 
-# Create a Private Route Table (Example - You'll typically add a NAT Gateway or Instance later)
+#  Create a private route table (you'll need a NAT Gateway or NAT Instance later for internet access from private subnets)
 resource "aws_route_table" "private_route_table" {
   vpc_id = aws_vpc.main.id
 
+  # Example route for a NAT Gateway (replace with your NAT Gateway ID)
+ # route {
+ #   cidr_block = "0.0.0.0/0"
+ #   nat_gateway_id = aws_nat_gateway.example.id # Add a NAT Gateway resource later
+ # }
   tags = {
     Name = "private-route-table"
   }
+
 }
 
-
-# Associate Private Subnets with the Private Route Table
-resource "aws_route_table_association" "private1_assoc" {
-  subnet_id      = aws_subnet.private1.id
+resource "aws_route_table_association" "private_subnet_1_association" {
+  subnet_id      = aws_subnet.private_subnet_1.id
   route_table_id = aws_route_table.private_route_table.id
 }
 
-resource "aws_route_table_association" "private2_assoc" {
-  subnet_id      = aws_subnet.private2.id
+resource "aws_route_table_association" "private_subnet_2_association" {
+  subnet_id      = aws_subnet.private_subnet_2.id
   route_table_id = aws_route_table.private_route_table.id
 }
