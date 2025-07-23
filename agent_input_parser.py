@@ -13,7 +13,7 @@ if not API_KEY:
     raise RuntimeError("Missing GOOGLE_API_KEY in your .env file.")
 
 genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel("gemini-1.5-pro")
+model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
 chat = model.start_chat(history=[])
 
 # 1. Patch Default Values
