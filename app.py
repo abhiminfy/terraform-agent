@@ -8,7 +8,7 @@ load_dotenv()
 # Safe import for agent logic
 try:
     import agent_input_parser
-except ImportError as e:
+except ImportError:
     st.error("❌ Failed to import agent_input_parser.py. Make sure it exists and contains `process_user_prompt()`.")
     st.stop()
 
@@ -21,10 +21,10 @@ st.caption("Talk freely. Ask general questions or describe your infra needs. The
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Chat input
+# User input
 user_prompt = st.chat_input("💬 Ask anything or describe your infrastructure...")
 
-# Core logic
+# Handle input
 if user_prompt:
     st.session_state.chat_history.append(("user", user_prompt))
 
@@ -34,14 +34,15 @@ if user_prompt:
     with st.chat_message("ai"):
         with st.spinner("💡 Thinking..."):
             try:
-                # Main processing function
+                # Process the user prompt
                 if hasattr(agent_input_parser, "process_user_prompt"):
                     result = agent_input_parser.process_user_prompt(user_prompt)
                 else:
-                    raise AttributeError("`process_user_prompt` not found in agent_input_parser.py")
+                    raise AttributeError("`process_user_prompt()` not found in agent_input_parser.py")
 
-                # Terraform response
-                if result["type"] == "terraform":
+                response_type = result.get("type")
+
+                if response_type == "terraform":
                     st.markdown("✅ Infrastructure prompt detected. Here's the response:")
 
                     if result.get("terraform_code"):
@@ -60,22 +61,25 @@ if user_prompt:
                     st.markdown(ai_message)
                     st.session_state.chat_history.append(("ai", ai_message))
 
-                # Clarification needed
-                elif result["type"] == "clarify":
+                elif response_type == "clarify":
                     ai_message = "🤔 I need a bit more detail before generating infrastructure. Can you clarify?"
                     st.markdown(ai_message)
-                    st.markdown(result["content"])
-                    st.session_state.chat_history.append(("ai", ai_message + "\n" + result["content"]))
+                    st.markdown(result.get("content", ""))
+                    st.session_state.chat_history.append(("ai", ai_message + "\n" + result.get("content", "")))
 
-                # Regular AI chat
-                elif result["type"] == "chat":
-                    st.markdown(result["content"])
-                    st.session_state.chat_history.append(("ai", result["content"]))
+                elif response_type == "chat":
+                    content = result.get("content", "I'm here to help!")
+                    st.markdown(content)
+                    st.session_state.chat_history.append(("ai", content))
 
-                # Error from parser
-                elif result["type"] == "error":
-                    st.error(f"❌ Error: {result['error']}")
-                    st.session_state.chat_history.append(("ai", f"❌ Error: {result['error']}"))
+                elif response_type == "error":
+                    error_msg = f"❌ Error: {result.get('error', 'Unknown error')}"
+                    st.error(error_msg)
+                    st.session_state.chat_history.append(("ai", error_msg))
+
+                else:
+                    st.warning("🤖 Received an unrecognized response type.")
+                    st.session_state.chat_history.append(("ai", "🤖 Received an unrecognized response type."))
 
             except Exception as e:
                 error_msg = f"❌ Unexpected error: {str(e)}"
@@ -86,5 +90,6 @@ if user_prompt:
 for role, message in st.session_state.chat_history:
     with st.chat_message(role):
         st.markdown(message)
+
 
 
