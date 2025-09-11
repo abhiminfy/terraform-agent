@@ -1,15 +1,16 @@
+import logging
 import os
 import sys
-import traceback
 import time
-import logging
-from dotenv import load_dotenv
+import traceback
+
 import google.generativeai as genai
+from backend.app.api.routes import router
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from backend.app.api.routes import router
 from fastapi.openapi.utils import get_openapi
+from fastapi.responses import JSONResponse
 
 # --- UTF-8 bootstrap for Windows consoles with emojis in logs ---
 try:

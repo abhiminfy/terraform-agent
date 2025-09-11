@@ -1,34 +1,30 @@
-from strands_tools import (
-    calculator,
-    terraform_validator,
-    infrastructure_analyzer,
-    file_operations,
-    plan_analyzer,
-    static_sanity_checks,
-)
-from src.app.utils.chat_memory import ChatMemory
-from src.app.services.guardrails import TerraformGuardrails
-from src.app.core.metrics import metrics
-from src.app.services.policy_engine import policy_engine
-from src.app.services.infracost_integration import infracost_integration
-from src.app.services.github_integration import github_integration
-from pathlib import Path
-from dotenv import load_dotenv
-import google.generativeai as genai
-import subprocess
-import re
-import os
-import traceback
-from typing import Dict, Any, Optional, List, Tuple
 import asyncio
-import time
-import tempfile
-import shutil
 import difflib
-from datetime import datetime
-
+import os
+import re
+import shutil
+import subprocess
 # --- UTF-8 bootstrap for Windows consoles with emojis in logs ---
-import sys, os
+import sys
+import tempfile
+import time
+import traceback
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import google.generativeai as genai
+from dotenv import load_dotenv
+from strands_tools import (calculator, file_operations,
+                           infrastructure_analyzer, plan_analyzer,
+                           static_sanity_checks, terraform_validator)
+
+from src.app.core.metrics import metrics
+from src.app.services.github_integration import github_integration
+from src.app.services.guardrails import TerraformGuardrails
+from src.app.services.infracost_integration import infracost_integration
+from src.app.services.policy_engine import policy_engine
+from src.app.utils.chat_memory import ChatMemory
 
 try:
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -1258,9 +1254,10 @@ Return numbered questions only."""
 
 # === APPEND: multi-turn chat + fallback + test ideas (non-destructive) ===
 from cachetools import TTLCache as _TTLCache
-from src.app.utils.utils import sanitize_user_text as _sa_sanitize
-from src.app.core.metrics import metrics as _sa_metrics
+
 from src.app.core.config import Settings as _SA_Settings
+from src.app.core.metrics import metrics as _sa_metrics
+from src.app.utils.utils import sanitize_user_text as _sa_sanitize
 
 _sa_settings = _SA_Settings()
 _sa_cache = _TTLCache(maxsize=512, ttl=3600)

@@ -1,6 +1,6 @@
-import re
-from typing import List, Dict, Any, Tuple
 import logging
+import re
+from typing import Any, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -430,6 +430,7 @@ class TerraformGuardrails:
 
 
 from io import StringIO as _GR_StringIO
+
 import hcl2 as _gr_hcl2
 
 

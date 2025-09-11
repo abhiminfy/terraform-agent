@@ -1,22 +1,25 @@
-from fastapi import APIRouter, HTTPException, Query, Request, Depends as _rt_Depends
-from fastapi.responses import JSONResponse, StreamingResponse, Response
-from pydantic import BaseModel
-from dotenv import load_dotenv
+import asyncio
+import json
+import logging
 import os
+import re
+import time
+import traceback
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional
+from uuid import uuid4
+
 import google.generativeai as genai
 from backend.app.services.strands_agent import TerraformAgent
-import traceback
-import asyncio
-import logging
-import json
-import uuid
-import time
-import re
-from pathlib import Path
-from typing import List, Optional, Dict, Any, Literal
-from datetime import datetime
 from backend.app.utils.verified import verify_answer
-from uuid import uuid4
+from dotenv import load_dotenv
+from fastapi import APIRouter
+from fastapi import Depends as _rt_Depends
+from fastapi import HTTPException, Query, Request
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel
 
 # Prometheus content-type fallback
 try:
@@ -26,9 +29,9 @@ except Exception:
 
 # Local modules
 from backend.app.core.metrics import metrics
-from backend.app.services.policy_engine import policy_engine
-from backend.app.services.infracost_integration import infracost_integration
 from backend.app.services.github_integration import github_integration
+from backend.app.services.infracost_integration import infracost_integration
+from backend.app.services.policy_engine import policy_engine
 
 
 # ============================================================
@@ -1096,8 +1099,8 @@ async def validate_terraform_code(request: ValidateRequest):
         if not terraform_code:
             return {"status": "error", "error": "No Terraform code provided"}
 
-        from strands_tools import terraform_validator, infrastructure_analyzer
         from backend.app.services.guardrails import TerraformGuardrails
+        from strands_tools import infrastructure_analyzer, terraform_validator
 
         guardrails = TerraformGuardrails()
         formatted_code = terraform_validator.format_terraform_code(terraform_code)
@@ -1384,8 +1387,8 @@ def clear_system_cache():
 @metrics.track_request("GET", "/admin/system/info")  # sync -> safe
 def get_system_info():
     try:
-        import sys
         import platform
+        import sys
 
         return {
             "status": "success",
@@ -1425,33 +1428,29 @@ def get_system_info():
         return {"status": "error", "error": str(e)}
 
 
+import httpx as _rt_httpx
+import jwt as _rt_jwt
+from backend.app.core.config import Settings as _RT_Settings
+from backend.app.services.background import celery_app as _rt_celery
+from backend.app.services.github_integration import \
+    enable_auto_apply_action as _rt_enable_actions
+from backend.app.services.github_integration import \
+    trufflehog_scan_ref as _rt_truffle
+from backend.app.services.infracost_integration import \
+    estimate_cost_async_v2 as _rt_cost_v2
+from backend.app.services.policy_engine import \
+    validate_terraform_code_ast as _rt_validate_ast
+from backend.app.services.strands_agent import chat_secure as _rt_chat_secure
+from backend.app.services.strands_agent import \
+    generate_tf_unit_tests as _rt_ai_tests
+from backend.app.utils.utils import run_cmd_async as _rt_run_cmd_async
+from backend.app.utils.utils import sanitize_user_text as _rt_sanitize
+from backend.app.utils.utils import secure_tempdir as _rt_secure_tempdir
 # ---------------------------
 # SECURE/JWT endpoints (not decorated by metrics)
 # ---------------------------
 from slowapi import Limiter as _rt_Limiter
 from slowapi.util import get_remote_address as _rt_get_remote_address
-import jwt as _rt_jwt, httpx as _rt_httpx
-from backend.app.core.config import Settings as _RT_Settings
-from backend.app.services.background import celery_app as _rt_celery
-from backend.app.utils.utils import (
-    sanitize_user_text as _rt_sanitize,
-    run_cmd_async as _rt_run_cmd_async,
-    secure_tempdir as _rt_secure_tempdir,
-)
-from backend.app.services.strands_agent import (
-    chat_secure as _rt_chat_secure,
-    generate_tf_unit_tests as _rt_ai_tests,
-)
-from backend.app.services.infracost_integration import (
-    estimate_cost_async_v2 as _rt_cost_v2,
-)
-from backend.app.services.policy_engine import (
-    validate_terraform_code_ast as _rt_validate_ast,
-)
-from backend.app.services.github_integration import (
-    trufflehog_scan_ref as _rt_truffle,
-    enable_auto_apply_action as _rt_enable_actions,
-)
 
 _RT = _RT_Settings()
 _limiter2 = _rt_Limiter(key_func=_rt_get_remote_address)

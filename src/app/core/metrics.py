@@ -1,20 +1,14 @@
 # -*- coding: utf-8 -*-
 # metrics.py - Prometheus metrics implementation
-import time
 import logging
+import time
 from functools import wraps
-from typing import Dict, Any
-
-from prometheus_client import (
-    Counter,
-    Histogram,
-    Gauge,
-    CollectorRegistry,
-    generate_latest,
-)
-from prometheus_client.exposition import push_to_gateway
+from typing import Any, Dict
 
 from backend.app.core.config import Settings
+from prometheus_client import (CollectorRegistry, Counter, Gauge, Histogram,
+                               generate_latest)
+from prometheus_client.exposition import push_to_gateway
 
 logger = logging.getLogger(__name__)
 settings = Settings()

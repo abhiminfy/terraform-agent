@@ -1,15 +1,11 @@
 # -*- coding: utf-8 -*-
 import asyncio
-from celery import Celery
 
 from backend.app.core.config import Settings
-from backend.app.services.infracost_integration import (
-    infracost_integration,
-)  # existing object if any
+from backend.app.services.infracost_integration import (  # existing object if any; appended below
+    estimate_cost_async_v2, infracost_integration)
 from backend.app.utils.utils import run_cmd_async, secure_tempdir
-from backend.app.services.infracost_integration import (
-    estimate_cost_async_v2,
-)  # appended below
+from celery import Celery
 
 settings = Settings()
 

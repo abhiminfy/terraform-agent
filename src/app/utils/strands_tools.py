@@ -1,14 +1,15 @@
-import subprocess
 import json
+import logging
 import os
 import re
-import requests
-from pathlib import Path
-from typing import Dict, Any, List, Optional, Union
-import tempfile
 import shutil
-import logging
+import subprocess
+import tempfile
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
+import requests
 import yaml
 
 # Set up logging
@@ -307,10 +308,10 @@ class TerraformValidatorTool:
           - terraform plan -no-color -detailed-exitcode
         Returns plan text and exit codes. Does NOT apply.
         """
-        import tempfile
-        import subprocess
-        from pathlib import Path
         import re
+        import subprocess
+        import tempfile
+        from pathlib import Path
 
         out: Dict[str, Any] = {
             "fmt_ok": False,
@@ -1903,12 +1904,12 @@ def ensure_minimal_scaffold(
 # === APPEND: pluggable tools + HCL parsing (non-destructive) ===
 import abc as _abc
 from io import StringIO as _ST_StringIO
+
 import hcl2 as _st_hcl2
-from src.app.utils.utils import (
-    run_cmd_async as _st_run_cmd_async,
-    secure_tempdir as _st_secure_tempdir,
-)
+
 from src.app.core.config import Settings as _ST_Settings
+from src.app.utils.utils import run_cmd_async as _st_run_cmd_async
+from src.app.utils.utils import secure_tempdir as _st_secure_tempdir
 
 _ST = _ST_Settings()
 

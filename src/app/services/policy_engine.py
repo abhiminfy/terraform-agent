@@ -1,11 +1,12 @@
 # policy_engine.py - Policy-as-code implementation with tfsec/checkov integration
-import subprocess
 import json
-import tempfile
-import os
-from pathlib import Path
-from typing import Dict, Any, List, Optional
 import logging
+import os
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 import yaml
 
 logger = logging.getLogger(__name__)
@@ -526,14 +527,16 @@ class PolicyEngine:
     # === APPEND: AST-based validation utilities (non-destructive) ===
 
 
-from io import StringIO as _PE_StringIO
 import json as _pe_json
+from io import StringIO as _PE_StringIO
+from typing import Any as _Any
+from typing import Dict as _Dict
+from typing import List as _List
+from typing import Tuple as _Tuple
+
 import hcl2 as _pe_hcl2
-from typing import Any as _Any, Dict as _Dict, List as _List, Tuple as _Tuple
-from backend.app.utils.utils import (
-    run_cmd_async as _pe_run_cmd_async,
-    secure_tempdir as _pe_secure_tempdir,
-)
+from backend.app.utils.utils import run_cmd_async as _pe_run_cmd_async
+from backend.app.utils.utils import secure_tempdir as _pe_secure_tempdir
 
 _SOC2_CONTROLS = {
     "network_segmentation": "Security groups should restrict ingress/egress broadly."

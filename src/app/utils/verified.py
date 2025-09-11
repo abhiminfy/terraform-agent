@@ -5,8 +5,10 @@ verified.py: Strict JSON verification for agent outputs using Gemini 1.5 Pro.
 - Adds sources and sets verified=True only when evidence present
 """
 
-import os, json
+import json
+import os
 from typing import Any, Dict
+
 import google.generativeai as genai  # type: ignore
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")

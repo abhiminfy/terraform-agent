@@ -1,5 +1,5 @@
-import sqlite3
 import os
+import sqlite3
 
 DB_PATH = os.getenv("CHAT_DB_PATH", "agent.db")
 conn = sqlite3.connect(DB_PATH)

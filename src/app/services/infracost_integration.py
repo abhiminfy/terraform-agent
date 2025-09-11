@@ -1,11 +1,11 @@
-import subprocess
 import json
-import tempfile
-import os
-from pathlib import Path
-from typing import Dict, Any, Optional, List
 import logging
+import os
+import subprocess
+import tempfile
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -611,12 +611,11 @@ provider "aws" {
 
 
 import time as _time
-from cachetools import TTLCache as _TTLCache
-from backend.app.utils.utils import (
-    run_cmd_async as _ic_run_cmd_async,
-    secure_tempdir as _ic_secure_tempdir,
-)
+
 from backend.app.core.config import Settings as _IC_Settings
+from backend.app.utils.utils import run_cmd_async as _ic_run_cmd_async
+from backend.app.utils.utils import secure_tempdir as _ic_secure_tempdir
+from cachetools import TTLCache as _TTLCache
 
 _ic_settings = _IC_Settings()
 _ic_cache = _TTLCache(maxsize=256, ttl=3600)
@@ -641,7 +640,8 @@ async def estimate_cost_async_v2(tf_code: str, currency: str = "USD"):
 
     try:
         with _ic_secure_tempdir("ic_v2_") as d:
-            import os as _os, json as _json
+            import json as _json
+            import os as _os
 
             with open(_os.path.join(d, "main.tf"), "w", encoding="utf-8") as f:
                 f.write(tf_code)

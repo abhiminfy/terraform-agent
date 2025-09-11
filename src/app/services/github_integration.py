@@ -1,11 +1,12 @@
 # github_integration.py - GitHub PR workflow with policy and cost checks (fixed)
-import requests
-import json
-import os
-from typing import Dict, Any, Optional, List
-import logging
-from datetime import datetime
 import base64
+import json
+import logging
+import os
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -526,8 +527,9 @@ class GitHubIntegration:
             "summary": "",
         }
         try:
+            from backend.app.services.infracost_integration import \
+                infracost_integration
             from backend.app.services.policy_engine import policy_engine
-            from backend.app.services.infracost_integration import infracost_integration
             from strands_tools import terraform_validator
 
             # Policy
@@ -852,10 +854,11 @@ async def commit_files(
     return github_integration._commit_multiple_files(branch, files, commit_message)
 
 
+import json as _gh_json
+
 # (Optional) TruffleHog/Auto-apply helpers your routes may call
 from backend.app.core.config import Settings as _GH_Settings
 from backend.app.utils.utils import run_cmd_async as _gh_run_cmd_async
-import json as _gh_json
 
 _GH = _GH_Settings()
 
