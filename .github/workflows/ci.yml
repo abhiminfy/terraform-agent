@@ -1,4 +1,5 @@
 name: CI
+
 on:
   push:
   pull_request:
@@ -8,13 +9,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+
     - uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-    - run: pip install -r requirements.txt
-    - run: pip install black isort flake8 mypy pytest
-    - run: black --check .
-    - run: isort --check-only .
-    - run: flake8 .
-    - run: mypy --ignore-missing-imports .
-    - run: pytest -q
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+      working-directory: ./src  
+
+    - name: Install linting and testing tools
+      run: pip install black isort flake8 mypy pytest
+      
+
+    - name: Run black formatter check
+      run: black --check .
+      working-directory: ./src 
+
+    - name: Run isort import check
+      run: isort --check-only .
+      working-directory: ./src  
+
+    - name: Run flake8 linter
+      run: flake8 .
+      working-directory: ./src  
+
+    - name: Run mypy static type checker
+      run: mypy --ignore-missing-imports .
+      working-directory: ./src  
+
+    - name: Run pytest
+      run: pytest -q
+      working-directory: ./src  
