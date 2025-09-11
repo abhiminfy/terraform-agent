@@ -30,6 +30,7 @@ from backend.app.services.policy_engine import policy_engine
 from backend.app.services.infracost_integration import infracost_integration
 from backend.app.services.github_integration import github_integration
 
+
 # ============================================================
 # NEW: OpenAI wrapper + Infra formatter
 # ============================================================
@@ -40,15 +41,20 @@ def openai_chat_response(content: str, model: str = "terraform-agent") -> dict:
         "object": "chat.completion",
         "created": int(time.time()),
         "model": model,
-        "choices": [{
-            "index": 0,
-            "message": {"role": "assistant", "content": content},
-            "finish_reason": "stop",
-        }],
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }
+        ],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     }
 
-def format_infra_reply(status: str, code: Optional[str], diagnostics: Optional[str]) -> str:
+
+def format_infra_reply(
+    status: str, code: Optional[str], diagnostics: Optional[str]
+) -> str:
     """
     Produce one Markdown message that includes:
       - header
@@ -69,8 +75,12 @@ def format_infra_reply(status: str, code: Optional[str], diagnostics: Optional[s
     if code:
         parts.append("### Terraform (HCL)\n```hcl\n" + code.strip() + "\n```")
 
-    parts.append("### What I did next\n- Saved to `main.tf`\n- You can run `terraform init && terraform validate`")
+    parts.append(
+        "### What I did next\n- Saved to `main.tf`\n- You can run `terraform init && terraform validate`"
+    )
     return "\n\n".join(parts).strip()
+
+
 # ============================================================
 
 
@@ -94,6 +104,7 @@ def _asdict(value):
     if hasattr(value, "__dict__"):
         return dict(value.__dict__)
     return {"result": str(value)}
+
 
 async def _attach_verification(user_msg: str, payload: dict) -> dict:
     """Add verification fields without changing your response shape."""
@@ -126,15 +137,28 @@ async def _attach_verification(user_msg: str, payload: dict) -> dict:
             payload.setdefault("verification_note", f"Verification failed: {str(e)}")
         return payload
 
+
 # ---------- NEW: Fallback helpers ----------
 def _is_probably_code_request(text: str) -> bool:
     t = (text or "").lower()
     # quick heuristics that cover most IaC asks
     keywords = [
-        "terraform", "hcl", "resource", "module", "generate", "create",
-        "aws_", "azurerm_", "google_", "s3", "vpc", "ec2", "bucket"
+        "terraform",
+        "hcl",
+        "resource",
+        "module",
+        "generate",
+        "create",
+        "aws_",
+        "azurerm_",
+        "google_",
+        "s3",
+        "vpc",
+        "ec2",
+        "bucket",
     ]
     return any(k in t for k in keywords)
+
 
 def _extract_hcl_from_text(t: str) -> str:
     """Try to pull HCL from a Markdown code fence first; else return the text as-is."""
@@ -144,6 +168,7 @@ def _extract_hcl_from_text(t: str) -> str:
     if m:
         return m.group(1).strip()
     return t.strip()
+
 
 async def _gemini_fallback(prompt: str, code_preferred: bool = False) -> str:
     """
@@ -182,6 +207,7 @@ async def _gemini_fallback(prompt: str, code_preferred: bool = False) -> str:
         logger.warning(f"Gemini fallback failed: {e}")
         return ""
 
+
 def _looks_like_empty_or_error_text(text: str) -> bool:
     if not text or not text.strip():
         return True
@@ -192,6 +218,7 @@ def _looks_like_empty_or_error_text(text: str) -> bool:
         or t == "i need more information to help you better."
         or t == "i need more information"
     )
+
 
 # ---------------------------
 # Init / Env / Logging
@@ -225,6 +252,7 @@ except Exception as e:
     logger.error("[ERROR] Failed to initialize TerraformAgent: %s", str(e))
     logger.error(traceback.format_exc())
 
+
 # ---------------------------
 # Router-level Request ID
 # ---------------------------
@@ -245,14 +273,18 @@ async def add_request_id_middleware(request, call_next):
         logger.error("Request failed: %s", str(exc))
         raise
 
+
 try:
     if hasattr(router, "middleware"):
         router.middleware("http")(add_request_id_middleware)
         logger.info("APIRouter.middleware registered")
     else:
-        logger.info("APIRouter.middleware not available; app-level will handle request IDs")
+        logger.info(
+            "APIRouter.middleware not available; app-level will handle request IDs"
+        )
 except Exception as _e:
     logger.warning("Router middleware registration skipped: %s", str(_e))
+
 
 # ---------------------------
 # Models
@@ -261,31 +293,38 @@ class ChatMessageRequest(BaseModel):
     chat_id: str
     user_message: str
 
+
 class ChatRenameRequest(BaseModel):
     title: str
     archived: Optional[bool] = False
+
 
 class ChatHistoryRequest(BaseModel):
     chat_id: str
     limit: Optional[int] = 20
 
+
 class ValidateRequest(BaseModel):
     terraform_code: str
     run_policy_checks: Optional[bool] = True
+
 
 class BudgetUpdateRequest(BaseModel):
     workspace: str
     monthly_limit: float
     alert_thresholds: List[float]
 
+
 class CreatePRRequest(BaseModel):
     terraform_code: str
     commit_message: Optional[str] = None
     branch_name: Optional[str] = None
 
+
 class MergePRRequest(BaseModel):
     pr_number: int
     merge_method: Optional[str] = "squash"  # squash, merge, rebase
+
 
 class ChatSettingsRequest(BaseModel):
     cloud: Optional[str] = None
@@ -293,12 +332,14 @@ class ChatSettingsRequest(BaseModel):
     environment: Optional[str] = None
     budget: Optional[float] = None
 
+
 # ---------------------------
 # Simple ping for readiness
 # ---------------------------
 @router.get("/ping")
 def ping():
     return {"ok": True}
+
 
 # ---------------------------
 # Basic / Health
@@ -318,6 +359,7 @@ async def test_endpoint():
     except Exception as e:
         logger.error("Health check failed: %s", str(e))
         raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
+
 
 @router.get("/health")
 async def detailed_health_check():
@@ -360,6 +402,7 @@ async def detailed_health_check():
         logger.error("Detailed health check failed: %s", str(e))
         return {"status": "unhealthy", "error": str(e), "agent_initialized": False}
 
+
 # ---------------------------
 # Chat
 # ---------------------------
@@ -397,8 +440,11 @@ async def chat_with_ai(req: ChatMessageRequest):
         content = (result or {}).get("content", "") if isinstance(result, dict) else ""
         tf_code = ""
         if isinstance(result, dict):
-            tf_code = (result.get("terraform_code") or
-                       result.get("artifacts", {}).get("formatted_code") or "").strip()
+            tf_code = (
+                result.get("terraform_code")
+                or result.get("artifacts", {}).get("formatted_code")
+                or ""
+            ).strip()
 
         need_fallback = (
             result is None
@@ -421,7 +467,11 @@ async def chat_with_ai(req: ChatMessageRequest):
                         "terraform_code": tf,
                         "thinking": "",
                         "tool_status": {},
-                        "chat_id": result.get("chat_id", req.chat_id) if isinstance(result, dict) else req.chat_id,
+                        "chat_id": (
+                            result.get("chat_id", req.chat_id)
+                            if isinstance(result, dict)
+                            else req.chat_id
+                        ),
                         "confidence_score": 0.7,
                         "request_id": request_id,
                         "artifacts": {
@@ -493,9 +543,7 @@ async def chat_with_ai(req: ChatMessageRequest):
                 "status": "success",
                 "type": "clarify",
                 "response": "I need more information to help you better.",
-                "questions": result.get(
-                    "questions", "Could you provide more details?"
-                ),
+                "questions": result.get("questions", "Could you provide more details?"),
                 "thinking": result.get("thinking_trace", ""),
                 "tool_status": result.get("tool_status", {}),
                 "chat_id": result.get("chat_id", req.chat_id),
@@ -524,7 +572,8 @@ async def chat_with_ai(req: ChatMessageRequest):
                 "confidence_score": result.get("confidence_score", 0.0),
                 "request_id": request_id,
                 "artifacts": {
-                    "formatted_code": result.get("formatted_code", "") or terraform_code,
+                    "formatted_code": result.get("formatted_code", "")
+                    or terraform_code,
                     "validation_output": result.get("validation_output", ""),
                     "diff": result.get("diff", ""),
                 },
@@ -582,6 +631,7 @@ async def chat_with_ai(req: ChatMessageRequest):
 
         raise HTTPException(status_code=500, detail=payload)
 
+
 # GET + SSE (EventSource)
 @router.get("/chat/stream")
 async def chat_with_ai_stream(
@@ -613,9 +663,10 @@ async def chat_with_ai_stream(
 
             if result:
                 thinking_trace = result.get("thinking_trace", "")
-                stream_thinking = user_message.lower().startswith(
-                    "debug:"
-                ) or "thinking" in user_message.lower()
+                stream_thinking = (
+                    user_message.lower().startswith("debug:")
+                    or "thinking" in user_message.lower()
+                )
 
                 if thinking_trace and stream_thinking:
                     chunk_size = 30
@@ -659,7 +710,9 @@ async def chat_with_ai_stream(
                         {
                             "artifacts": {
                                 "formatted_code": result.get("formatted_code", ""),
-                                "validation_output": result.get("validation_output", ""),
+                                "validation_output": result.get(
+                                    "validation_output", ""
+                                ),
                                 "diff": result.get("diff", ""),
                             },
                             "analysis": {
@@ -694,7 +747,9 @@ async def chat_with_ai_stream(
                 yield f"data: {json.dumps(final_data)}\n\n"
             else:
                 # Try a minimal fallback in stream as well
-                fb = await _gemini_fallback(user_message, _is_probably_code_request(user_message))
+                fb = await _gemini_fallback(
+                    user_message, _is_probably_code_request(user_message)
+                )
                 if fb:
                     yield f"data: {json.dumps({'status':'success','type':'chat','response': fb,'done': True, 'request_id': request_id})}\n\n"
                 else:
@@ -713,6 +768,7 @@ async def chat_with_ai_stream(
         },
     )
 
+
 # ---------------------------
 # OpenAI-compatible adapter for UIs like Open WebUI
 # ---------------------------
@@ -720,10 +776,12 @@ class OAIMsg(BaseModel):
     role: Literal["system", "user", "assistant"]
     content: str
 
+
 class OAIChatReq(BaseModel):
     model: Optional[str] = "terraform-agent"
     messages: List[OAIMsg]
     stream: bool = False
+
 
 def _oai_extract_user_text(messages: List[OAIMsg]) -> str:
     # last user message wins; fallback to last message
@@ -732,9 +790,11 @@ def _oai_extract_user_text(messages: List[OAIMsg]) -> str:
             return (m.content or "").strip()
     return (messages[-1].content or "").strip() if messages else ""
 
+
 def _chunk(s: str, n: int = 120):
     for i in range(0, len(s), n):
-        yield s[i:i+n]
+        yield s[i : i + n]
+
 
 def _extract_text(result: Optional[Dict[str, Any]]) -> str:
     if not isinstance(result, dict):
@@ -751,6 +811,7 @@ def _extract_text(result: Optional[Dict[str, Any]]) -> str:
         if isinstance(c, str) and c.strip():
             return c
     return ""
+
 
 def _render_text_for_oai(result: Optional[Dict[str, Any]]) -> str:
     if not isinstance(result, dict):
@@ -771,7 +832,9 @@ def _render_text_for_oai(result: Optional[Dict[str, Any]]) -> str:
 
     if rtype == "terraform":
         summary = (result.get("content") or "Terraform code generated.").strip()
-        tf = result.get("terraform_code") or result.get("artifacts", {}).get("formatted_code", "")
+        tf = result.get("terraform_code") or result.get("artifacts", {}).get(
+            "formatted_code", ""
+        )
         tf = (tf or "").strip()
         if tf:
             return f"{summary}\n\n```hcl\n{tf}\n```"
@@ -784,17 +847,21 @@ def _render_text_for_oai(result: Optional[Dict[str, Any]]) -> str:
     except Exception:
         return "No content generated."
 
+
 @router.get("/v1/models")
 def oai_models():
     return {
         "object": "list",
-        "data": [{
-            "id": "terraform-agent",
-            "object": "model",
-            "created": int(time.time()),
-            "owned_by": "local",
-        }],
+        "data": [
+            {
+                "id": "terraform-agent",
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "local",
+            }
+        ],
     }
+
 
 @router.post("/v1/chat/completions")
 async def oai_chat(req: OAIChatReq):
@@ -816,8 +883,7 @@ async def oai_chat(req: OAIChatReq):
     # ---------- Non-streaming ----------
     if not req.stream:
         result = await asyncio.wait_for(
-            terraform_agent.process_message(user_text, chat_id),
-            timeout=180.0
+            terraform_agent.process_message(user_text, chat_id), timeout=180.0
         )
 
         text = ""
@@ -825,10 +891,16 @@ async def oai_chat(req: OAIChatReq):
 
         # Terraform branch -> format with code + diagnostics
         if isinstance(result, dict) and rtype == "terraform":
-            tf_code = (result.get("terraform_code") or
-                       result.get("artifacts", {}).get("formatted_code") or "").strip()
-            diagnostics = (result.get("validation_output") or
-                           result.get("artifacts", {}).get("validation_output") or "").strip()
+            tf_code = (
+                result.get("terraform_code")
+                or result.get("artifacts", {}).get("formatted_code")
+                or ""
+            ).strip()
+            diagnostics = (
+                result.get("validation_output")
+                or result.get("artifacts", {}).get("validation_output")
+                or ""
+            ).strip()
 
             status = "ok"
             # If we have diagnostics that look like errors or code missing, mark failed
@@ -844,40 +916,55 @@ async def oai_chat(req: OAIChatReq):
                     tf_code = _extract_hcl_from_text(fb)
                     status = "ok" if tf_code and not diagnostics else status
 
-            text = format_infra_reply(status=status, code=tf_code, diagnostics=diagnostics)
+            text = format_infra_reply(
+                status=status, code=tf_code, diagnostics=diagnostics
+            )
 
         else:
             # Non-infra -> render normally then apply fallback if needed
             text = _render_text_for_oai(result)
-            missing_or_clarify = _looks_like_empty_or_error_text(text) or rtype == "clarify"
+            missing_or_clarify = (
+                _looks_like_empty_or_error_text(text) or rtype == "clarify"
+            )
             if missing_or_clarify:
-                fb = await _gemini_fallback(user_text, code_preferred=_is_probably_code_request(user_text))
+                fb = await _gemini_fallback(
+                    user_text, code_preferred=_is_probably_code_request(user_text)
+                )
                 if fb:
                     if _is_probably_code_request(user_text):
                         tf = _extract_hcl_from_text(fb)
-                        text = format_infra_reply(status="ok", code=tf, diagnostics=None)
+                        text = format_infra_reply(
+                            status="ok", code=tf, diagnostics=None
+                        )
                     else:
                         text = fb
 
         if not text or not text.strip():
             text = "I'm ready to help you with Terraform. What would you like to do?"
 
-        return JSONResponse(openai_chat_response(text, model=req.model or "terraform-agent"))
+        return JSONResponse(
+            openai_chat_response(text, model=req.model or "terraform-agent")
+        )
 
     # ---------- Streaming (delta) ----------
     async def gen():
         try:
             result = await asyncio.wait_for(
-                terraform_agent.process_message(user_text, chat_id),
-                timeout=180.0
+                terraform_agent.process_message(user_text, chat_id), timeout=180.0
             )
 
             rtype = (result or {}).get("type", "") if isinstance(result, dict) else ""
             if isinstance(result, dict) and rtype == "terraform":
-                tf_code = (result.get("terraform_code") or
-                           result.get("artifacts", {}).get("formatted_code") or "").strip()
-                diagnostics = (result.get("validation_output") or
-                               result.get("artifacts", {}).get("validation_output") or "").strip()
+                tf_code = (
+                    result.get("terraform_code")
+                    or result.get("artifacts", {}).get("formatted_code")
+                    or ""
+                ).strip()
+                diagnostics = (
+                    result.get("validation_output")
+                    or result.get("artifacts", {}).get("validation_output")
+                    or ""
+                ).strip()
                 status = "ok"
                 if diagnostics and re.search(r"\berror\b", diagnostics, re.IGNORECASE):
                     status = "validation_failed"
@@ -887,41 +974,62 @@ async def oai_chat(req: OAIChatReq):
                     if fb:
                         tf_code = _extract_hcl_from_text(fb)
                         status = "ok" if tf_code and not diagnostics else status
-                text = format_infra_reply(status=status, code=tf_code, diagnostics=diagnostics)
+                text = format_infra_reply(
+                    status=status, code=tf_code, diagnostics=diagnostics
+                )
             else:
                 text = _render_text_for_oai(result)
                 if _looks_like_empty_or_error_text(text) or rtype == "clarify":
-                    fb = await _gemini_fallback(user_text, code_preferred=_is_probably_code_request(user_text))
+                    fb = await _gemini_fallback(
+                        user_text, code_preferred=_is_probably_code_request(user_text)
+                    )
                     if fb:
                         if _is_probably_code_request(user_text):
                             tf = _extract_hcl_from_text(fb)
-                            text = format_infra_reply(status="ok", code=tf, diagnostics=None)
+                            text = format_infra_reply(
+                                status="ok", code=tf, diagnostics=None
+                            )
                         else:
                             text = fb
 
             if not text or not text.strip():
-                text = "I'm ready to help you with Terraform. What would you like to do?"
+                text = (
+                    "I'm ready to help you with Terraform. What would you like to do?"
+                )
 
             for part in _chunk(text):
-                yield "data: " + json.dumps({
-                    "id": f"cmpl-{uuid4().hex}",
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": req.model or "terraform-agent",
-                    "choices": [{"index": 0, "delta": {"content": part}, "finish_reason": None}],
-                }) + "\n\n"
+                yield "data: " + json.dumps(
+                    {
+                        "id": f"cmpl-{uuid4().hex}",
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": req.model or "terraform-agent",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": part},
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                ) + "\n\n"
                 await asyncio.sleep(0)
             yield "data: [DONE]\n\n"
         except Exception as e:
-            yield "data: " + json.dumps({
-                "error": {"message": str(e), "type": "internal_error"}
-            }) + "\n\n"
+            yield "data: " + json.dumps(
+                {"error": {"message": str(e), "type": "internal_error"}}
+            ) + "\n\n"
 
     return StreamingResponse(
         gen(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
+
 
 # Delete branch (async) — do NOT decorate with async-unsafe metrics decorator
 @router.delete("/github/branch/{branch_name}")
@@ -937,7 +1045,10 @@ async def delete_branch(branch_name: str):
             }
     except Exception as e:
         logger.error("Failed to delete branch: %s", str(e))
-        raise HTTPException(status_code=500, detail=f"Failed to delete branch: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to delete branch: {str(e)}"
+        )
+
 
 # ---------------------------
 # Tools / Validation
@@ -977,6 +1088,7 @@ async def get_tool_status():
         logger.error("Tool status check failed: %s", str(e))
         return {"status": "error", "error": str(e)}
 
+
 @router.post("/validate")
 async def validate_terraform_code(request: ValidateRequest):
     try:
@@ -989,7 +1101,9 @@ async def validate_terraform_code(request: ValidateRequest):
 
         guardrails = TerraformGuardrails()
         formatted_code = terraform_validator.format_terraform_code(terraform_code)
-        validation_result = terraform_validator.validate_terraform_syntax(formatted_code)
+        validation_result = terraform_validator.validate_terraform_syntax(
+            formatted_code
+        )
         security_analysis = infrastructure_analyzer.analyze_terraform_resources(
             formatted_code
         )
@@ -1038,6 +1152,7 @@ async def validate_terraform_code(request: ValidateRequest):
         logger.error("Validation endpoint error: %s", str(e))
         return {"status": "error", "error": str(e)}
 
+
 # ---------------------------
 # Metrics
 # ---------------------------
@@ -1045,6 +1160,7 @@ async def validate_terraform_code(request: ValidateRequest):
 def get_metrics():
     metrics_data = metrics.get_metrics()
     return Response(content=metrics_data, media_type=_PROM_CTYPE)
+
 
 @router.get("/metrics/summary")
 @metrics.track_request("GET", "/metrics/summary")  # sync -> safe
@@ -1060,6 +1176,7 @@ def get_metrics_summary():
         logger.error("Metrics summary failed: %s", str(e))
         return {"status": "error", "error": str(e)}
 
+
 # ---------------------------
 # Budget / Cost
 # ---------------------------
@@ -1072,6 +1189,7 @@ def get_budget_status(workspace: str):
     except Exception as e:
         logger.error("Budget status check failed: %s", str(e))
         return {"status": "error", "error": str(e)}
+
 
 @router.put("/budgets/{workspace}")
 @metrics.track_request("PUT", "/budgets")  # sync -> safe
@@ -1090,6 +1208,7 @@ def update_budget(workspace: str, req: BudgetUpdateRequest):
     except Exception as e:
         logger.error("Budget update failed: %s", str(e))
         return {"status": "error", "error": str(e)}
+
 
 @router.post("/cost/diff")
 @metrics.track_request("POST", "/cost/diff")  # sync -> safe
@@ -1117,6 +1236,7 @@ def generate_cost_diff(request: dict):
         logger.error("Cost diff generation failed: %s", str(e))
         return {"status": "error", "error": str(e)}
 
+
 @router.post("/cost/estimate")
 @metrics.track_request("POST", "/cost/estimate")  # sync -> safe
 def generate_cost_estimate(request: dict):
@@ -1129,9 +1249,7 @@ def generate_cost_estimate(request: dict):
             terraform_code, workspace
         )
         if cost_result.get("success"):
-            monthly_cost = cost_result.get("cost_estimate", {}).get(
-                "monthly_cost", 0
-            )
+            monthly_cost = cost_result.get("cost_estimate", {}).get("monthly_cost", 0)
             metrics.record_cost_estimation("infracost", monthly_cost)
             return {"status": "success", **cost_result}
         else:
@@ -1142,6 +1260,7 @@ def generate_cost_estimate(request: dict):
     except Exception as e:
         logger.error("Cost estimation failed: %s", str(e))
         return {"status": "error", "error": str(e)}
+
 
 # ---------------------------
 # Policy
@@ -1155,6 +1274,7 @@ def get_policy_summary():
     except Exception as e:
         logger.error("Policy summary failed: %s", str(e))
         return {"status": "error", "error": str(e)}
+
 
 @router.post("/policy/validate")
 @metrics.track_request("POST", "/policy/validate")  # sync -> safe
@@ -1178,6 +1298,7 @@ def validate_with_policies(request: dict):
         logger.error("Policy validation failed: %s", str(e))
         return {"status": "error", "error": str(e)}
 
+
 # ---------------------------
 # Workflow: terraform -> PR (kept async here; not decorated by metrics)
 # ---------------------------
@@ -1189,7 +1310,9 @@ def terraform_to_pr_workflow(request: dict):
     try:
         terraform_code = (request.get("terraform_code") or "").strip()
         workspace = request.get("workspace") or "default"
-        commit_message = request.get("commit_message") or "feat(iac): add demo stack via TF Agent"
+        commit_message = (
+            request.get("commit_message") or "feat(iac): add demo stack via TF Agent"
+        )
         branch_name = request.get("branch_name") or f"tf/feature-{uuid4().hex[:8]}"
 
         if not terraform_code:
@@ -1237,6 +1360,7 @@ def terraform_to_pr_workflow(request: dict):
             },
         )
 
+
 # ---------------------------
 # Admin
 # ---------------------------
@@ -1255,12 +1379,14 @@ def clear_system_cache():
         logger.error("Cache clear failed: %s", str(e))
         return {"status": "error", "error": str(e)}
 
+
 @router.get("/admin/system/info")
 @metrics.track_request("GET", "/admin/system/info")  # sync -> safe
 def get_system_info():
     try:
         import sys
         import platform
+
         return {
             "status": "success",
             "system": {
@@ -1268,16 +1394,16 @@ def get_system_info():
                 "python_version": sys.version,
                 "current_directory": str(Path.cwd()),
                 "environment_variables": {
-                    "GEMINI_API_KEY": "configured"
-                    if os.getenv("GEMINI_API_KEY")
-                    else "missing",
-                    "GITHUB_TOKEN": "configured"
-                    if os.getenv("GITHUB_TOKEN")
-                    else "missing",
+                    "GEMINI_API_KEY": (
+                        "configured" if os.getenv("GEMINI_API_KEY") else "missing"
+                    ),
+                    "GITHUB_TOKEN": (
+                        "configured" if os.getenv("GITHUB_TOKEN") else "missing"
+                    ),
                     "GITHUB_REPO": os.getenv("GITHUB_REPO", "not configured"),
-                    "INFRACOST_API_KEY": "configured"
-                    if os.getenv("INFRACOST_API_KEY")
-                    else "missing",
+                    "INFRACOST_API_KEY": (
+                        "configured" if os.getenv("INFRACOST_API_KEY") else "missing"
+                    ),
                 },
             },
             "integrations": {
@@ -1298,6 +1424,7 @@ def get_system_info():
         logger.error("System info failed: %s", str(e))
         return {"status": "error", "error": str(e)}
 
+
 # ---------------------------
 # SECURE/JWT endpoints (not decorated by metrics)
 # ---------------------------
@@ -1311,13 +1438,24 @@ from backend.app.utils.utils import (
     run_cmd_async as _rt_run_cmd_async,
     secure_tempdir as _rt_secure_tempdir,
 )
-from backend.app.services.strands_agent import chat_secure as _rt_chat_secure, generate_tf_unit_tests as _rt_ai_tests
-from backend.app.services.infracost_integration import estimate_cost_async_v2 as _rt_cost_v2
-from backend.app.services.policy_engine import validate_terraform_code_ast as _rt_validate_ast
-from backend.app.services.github_integration import trufflehog_scan_ref as _rt_truffle, enable_auto_apply_action as _rt_enable_actions
+from backend.app.services.strands_agent import (
+    chat_secure as _rt_chat_secure,
+    generate_tf_unit_tests as _rt_ai_tests,
+)
+from backend.app.services.infracost_integration import (
+    estimate_cost_async_v2 as _rt_cost_v2,
+)
+from backend.app.services.policy_engine import (
+    validate_terraform_code_ast as _rt_validate_ast,
+)
+from backend.app.services.github_integration import (
+    trufflehog_scan_ref as _rt_truffle,
+    enable_auto_apply_action as _rt_enable_actions,
+)
 
 _RT = _RT_Settings()
 _limiter2 = _rt_Limiter(key_func=_rt_get_remote_address)
+
 
 def _rt_require_jwt(request: Request):
     auth = request.headers.get("Authorization", "")
@@ -1330,37 +1468,42 @@ def _rt_require_jwt(request: Request):
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+
 @router.post("/secure/chat")
 @_limiter2.limit(_RT.RATE_LIMIT_CHAT)
 async def _rt_secure_chat(
     request: Request,
     req: dict,
-    _= _rt_Depends(_rt_require_jwt),
+    _=_rt_Depends(_rt_require_jwt),
 ):
     chat_id = (req or {}).get("chat_id") or "default"
     user_text = _rt_sanitize((req or {}).get("user_text", ""))
     result = await _rt_chat_secure(chat_id, user_text)
     return JSONResponse(result)
 
+
 @router.post("/ai/generate-tests")
-async def _rt_generate_tests(req: dict, _= _rt_Depends(_rt_require_jwt)):
+async def _rt_generate_tests(req: dict, _=_rt_Depends(_rt_require_jwt)):
     tf_code = req.get("terraform_code", "")
     return JSONResponse(await _rt_ai_tests(tf_code))
 
+
 @router.post("/policy/validate/ast")
-async def _rt_policy_validate_ast(req: dict, _= _rt_Depends(_rt_require_jwt)):
+async def _rt_policy_validate_ast(req: dict, _=_rt_Depends(_rt_require_jwt)):
     tf_code = req.get("terraform_code", "")
     return JSONResponse(await _rt_validate_ast(tf_code))
 
+
 @router.post("/cost/estimate/async")
-async def _rt_cost_async(req: dict, _= _rt_Depends(_rt_require_jwt)):
+async def _rt_cost_async(req: dict, _=_rt_Depends(_rt_require_jwt)):
     tf_code = req.get("terraform_code", "")
     currency = (req.get("currency") or "USD").upper()
     task = _rt_celery.send_task("infracost.estimate", args=[tf_code, currency])
     return {"success": True, "data": {"task_id": task.id}, "error": ""}
 
+
 @router.get("/tasks/{task_id}")
-async def _rt_task_status(task_id: str, _= _rt_Depends(_rt_require_jwt)):
+async def _rt_task_status(task_id: str, _=_rt_Depends(_rt_require_jwt)):
     res = _rt_celery.AsyncResult(task_id)
     if res.ready():
         try:
@@ -1373,8 +1516,9 @@ async def _rt_task_status(task_id: str, _= _rt_Depends(_rt_require_jwt)):
         return {"success": True, "data": res.result, "error": ""}
     return {"success": True, "data": {"state": res.state}, "error": ""}
 
+
 @router.post("/cost/estimate/v2")
-async def _rt_cost_estimate_v2(req: dict, _= _rt_Depends(_rt_require_jwt)):
+async def _rt_cost_estimate_v2(req: dict, _=_rt_Depends(_rt_require_jwt)):
     tf_code = req.get("terraform_code", "")
     currency = (req.get("currency") or "USD").upper()
     res = await _rt_cost_v2(tf_code, currency=currency)
@@ -1386,17 +1530,20 @@ async def _rt_cost_estimate_v2(req: dict, _= _rt_Depends(_rt_require_jwt)):
             pass
     return JSONResponse(res)
 
+
 @router.post("/github/enable-auto-apply")
-async def _rt_enable_auto_apply(_= _rt_Depends(_rt_require_jwt)):
+async def _rt_enable_auto_apply(_=_rt_Depends(_rt_require_jwt)):
     return JSONResponse(await _rt_enable_actions())
 
+
 @router.post("/github/scan/trufflehog")
-async def _rt_scan_trufflehog(req: dict, _= _rt_Depends(_rt_require_jwt)):
+async def _rt_scan_trufflehog(req: dict, _=_rt_Depends(_rt_require_jwt)):
     ref = req.get("ref")
     return JSONResponse(await _rt_truffle(ref or None))
 
+
 @router.post("/notify")
-async def _rt_notify(req: dict, _= _rt_Depends(_rt_require_jwt)):
+async def _rt_notify(req: dict, _=_rt_Depends(_rt_require_jwt)):
     text = _rt_sanitize(req.get("text", ""))
     slack = req.get("slack_webhook")
     teams = req.get("teams_webhook")
@@ -1407,18 +1554,29 @@ async def _rt_notify(req: dict, _= _rt_Depends(_rt_require_jwt)):
             await client.post(teams, json={"text": text})
     return {"success": True, "data": {"posted": bool(slack or teams)}, "error": ""}
 
+
 @router.post("/visualize")
-async def _rt_visualize(req: dict, _= _rt_Depends(_rt_require_jwt)):
+async def _rt_visualize(req: dict, _=_rt_Depends(_rt_require_jwt)):
     tf_code = req.get("terraform_code", "")
     from os import path as _os_path
+
     with _rt_secure_tempdir("graph_v2_") as d:
         with open(_os_path.join(d, "main.tf"), "w", encoding="utf-8") as f:
             f.write(tf_code)
-        rc, out, err = await _rt_run_cmd_async("terraform", "init", "-input=false", cwd=d)
+        rc, out, err = await _rt_run_cmd_async(
+            "terraform", "init", "-input=false", cwd=d
+        )
         if rc != 0:
-            return {"success": False, "data": {"stderr": err}, "error": "terraform init failed"}
+            return {
+                "success": False,
+                "data": {"stderr": err},
+                "error": "terraform init failed",
+            }
         rc, dot, err = await _rt_run_cmd_async("terraform", "graph", cwd=d)
         if rc != 0:
-            return {"success": False, "data": {"stderr": err}, "error": "terraform graph failed"}
+            return {
+                "success": False,
+                "data": {"stderr": err},
+                "error": "terraform graph failed",
+            }
         return {"success": True, "data": {"dot": dot}, "error": ""}
-

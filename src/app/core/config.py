@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=True,        # respect case; we rely on aliases below
-        extra="ignore",             # <- prevents "extra inputs are not permitted"
+        case_sensitive=True,  # respect case; we rely on aliases below
+        extra="ignore",  # <- prevents "extra inputs are not permitted"
     )
 
     # ----- Core app defaults -----
@@ -91,7 +91,7 @@ class Settings(BaseSettings):
 
     # Rate limits
     @property
-    def RATE_LIMIT_CHAT(self) -> str:        # used by routes decorators
+    def RATE_LIMIT_CHAT(self) -> str:  # used by routes decorators
         return self.rate_limit_chat
 
     @property

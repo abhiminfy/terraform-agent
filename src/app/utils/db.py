@@ -4,7 +4,8 @@ import os
 DB_PATH = os.getenv("CHAT_DB_PATH", "agent.db")
 conn = sqlite3.connect(DB_PATH)
 cur = conn.cursor()
-cur.execute("""
+cur.execute(
+    """
 CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id TEXT,
@@ -13,8 +14,7 @@ CREATE TABLE IF NOT EXISTS messages (
     metadata TEXT,
     timestamp TEXT
 )
-""")
+"""
+)
 conn.commit()
 conn.close()
-
-

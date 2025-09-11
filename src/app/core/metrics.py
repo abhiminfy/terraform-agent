@@ -28,64 +28,64 @@ class MetricsCollector:
 
         # Request metrics
         self.request_count = Counter(
-            'terraform_agent_requests_total',
-            'Total number of requests',
-            ['method', 'endpoint', 'status'],
-            registry=self.registry
+            "terraform_agent_requests_total",
+            "Total number of requests",
+            ["method", "endpoint", "status"],
+            registry=self.registry,
         )
 
         self.request_duration = Histogram(
-            'terraform_agent_request_duration_seconds',
-            'Request duration in seconds',
-            ['method', 'endpoint'],
+            "terraform_agent_request_duration_seconds",
+            "Request duration in seconds",
+            ["method", "endpoint"],
             buckets=[0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0],
-            registry=self.registry
+            registry=self.registry,
         )
 
         # Tool metrics
         self.tool_execution_count = Counter(
-            'terraform_agent_tool_executions_total',
-            'Total tool executions',
-            ['tool_name', 'status'],
-            registry=self.registry
+            "terraform_agent_tool_executions_total",
+            "Total tool executions",
+            ["tool_name", "status"],
+            registry=self.registry,
         )
 
         self.tool_execution_duration = Histogram(
-            'terraform_agent_tool_duration_seconds',
-            'Tool execution duration',
-            ['tool_name'],
+            "terraform_agent_tool_duration_seconds",
+            "Tool execution duration",
+            ["tool_name"],
             buckets=[0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0],
-            registry=self.registry
+            registry=self.registry,
         )
 
         # Model metrics
         self.model_requests = Counter(
-            'terraform_agent_model_requests_total',
-            'Total model requests',
-            ['model_name', 'status'],
-            registry=self.registry
+            "terraform_agent_model_requests_total",
+            "Total model requests",
+            ["model_name", "status"],
+            registry=self.registry,
         )
 
         self.model_latency = Histogram(
-            'terraform_agent_model_latency_seconds',
-            'Model response latency',
-            ['model_name'],
+            "terraform_agent_model_latency_seconds",
+            "Model response latency",
+            ["model_name"],
             buckets=[0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0],
-            registry=self.registry
+            registry=self.registry,
         )
 
         self.model_tokens = Counter(
-            'terraform_agent_tokens_total',
-            'Total tokens processed',
-            ['model_name', 'type'],
-            registry=self.registry
+            "terraform_agent_tokens_total",
+            "Total tokens processed",
+            ["model_name", "type"],
+            registry=self.registry,
         )
 
         # NEW: Token budget remaining
         self.token_budget_remaining = Gauge(
-            'terraform_agent_token_budget_remaining',
-            'Remaining token budget',
-            registry=self.registry
+            "terraform_agent_token_budget_remaining",
+            "Remaining token budget",
+            registry=self.registry,
         )
         try:
             self.token_budget_remaining.set(float(settings.TOKEN_BUDGET))
@@ -94,59 +94,61 @@ class MetricsCollector:
 
         # Terraform metrics
         self.terraform_plans = Counter(
-            'terraform_agent_plans_total',
-            'Total terraform plans',
-            ['status'],
-            registry=self.registry
+            "terraform_agent_plans_total",
+            "Total terraform plans",
+            ["status"],
+            registry=self.registry,
         )
 
         self.terraform_plan_duration = Histogram(
-            'terraform_agent_plan_duration_seconds',
-            'Terraform plan duration',
+            "terraform_agent_plan_duration_seconds",
+            "Terraform plan duration",
             buckets=[1.0, 5.0, 10.0, 30.0, 60.0, 120.0],
-            registry=self.registry
+            registry=self.registry,
         )
 
         # Error metrics
         self.errors = Counter(
-            'terraform_agent_errors_total',
-            'Total errors by type',
-            ['error_type', 'endpoint'],
-            registry=self.registry
+            "terraform_agent_errors_total",
+            "Total errors by type",
+            ["error_type", "endpoint"],
+            registry=self.registry,
         )
 
         # Active connections
         self.chat_messages = Counter(
-            'terraform_agent_chat_messages_total',
-            'Total chat messages',
-            ['role', 'chat_type'],
-            registry=self.registry
+            "terraform_agent_chat_messages_total",
+            "Total chat messages",
+            ["role", "chat_type"],
+            registry=self.registry,
         )
 
         self.chat_sessions = Gauge(
-            'terraform_agent_chat_sessions_active',
-            'Active chat sessions',
-            registry=self.registry
+            "terraform_agent_chat_sessions_active",
+            "Active chat sessions",
+            registry=self.registry,
         )
 
         self.cost_estimations = Counter(
-            'terraform_agent_cost_estimations_total',
-            'Total cost estimations',
-            ['method'],
-            registry=self.registry
+            "terraform_agent_cost_estimations_total",
+            "Total cost estimations",
+            ["method"],
+            registry=self.registry,
         )
 
         self.estimated_costs = Gauge(
-            'terraform_agent_estimated_costs_usd',
-            'Estimated costs in USD',
-            registry=self.registry
+            "terraform_agent_estimated_costs_usd",
+            "Estimated costs in USD",
+            registry=self.registry,
         )
 
     # ---- Pushgateway helper (non-fatal) ----
     def _try_push(self, job: str):
         if settings.PROM_PUSHGATEWAY:
             try:
-                push_to_gateway(settings.PROM_PUSHGATEWAY, job=job, registry=self.registry)
+                push_to_gateway(
+                    settings.PROM_PUSHGATEWAY, job=job, registry=self.registry
+                )
             except Exception as e:
                 logger.debug(f"Pushgateway push failed (ignored): {e}")
 
@@ -161,7 +163,7 @@ class MetricsCollector:
 
     # ---- decorators (unchanged interface) ----
 
-        # Alias to keep older/newer code paths working
+    # Alias to keep older/newer code paths working
     def track_tool_execution(self, tool_name: str):
         # Reuse the existing decorator to avoid duplication
         return self.track_tool(tool_name)
@@ -177,14 +179,22 @@ class MetricsCollector:
                     return result
                 except Exception as e:
                     status = "error"
-                    self.errors.labels(error_type=type(e).__name__, endpoint=endpoint).inc()
+                    self.errors.labels(
+                        error_type=type(e).__name__, endpoint=endpoint
+                    ).inc()
                     raise
                 finally:
                     duration = time.time() - start_time
-                    self.request_count.labels(method=method, endpoint=endpoint, status=status).inc()
-                    self.request_duration.labels(method=method, endpoint=endpoint).observe(duration)
+                    self.request_count.labels(
+                        method=method, endpoint=endpoint, status=status
+                    ).inc()
+                    self.request_duration.labels(
+                        method=method, endpoint=endpoint
+                    ).observe(duration)
                     self._try_push("requests")
+
             return wrapper
+
         return decorator
 
     def track_tool(self, tool_name: str):
@@ -198,14 +208,22 @@ class MetricsCollector:
                     return result
                 except Exception as e:
                     status = "error"
-                    self.errors.labels(error_type=type(e).__name__, endpoint=tool_name).inc()
+                    self.errors.labels(
+                        error_type=type(e).__name__, endpoint=tool_name
+                    ).inc()
                     raise
                 finally:
                     duration = time.time() - start_time
-                    self.tool_execution_count.labels(tool_name=tool_name, status=status).inc()
-                    self.tool_execution_duration.labels(tool_name=tool_name).observe(duration)
+                    self.tool_execution_count.labels(
+                        tool_name=tool_name, status=status
+                    ).inc()
+                    self.tool_execution_duration.labels(tool_name=tool_name).observe(
+                        duration
+                    )
                     self._try_push("tools")
+
             return wrapper
+
         return decorator
 
     def track_model_call(self, model_name: str):
@@ -219,13 +237,17 @@ class MetricsCollector:
                 try:
                     result = func(*args, **kwargs)
                     if prompt_tokens > 0:
-                        self.model_tokens.labels(model_name=model_name, type="prompt").inc(prompt_tokens)
+                        self.model_tokens.labels(
+                            model_name=model_name, type="prompt"
+                        ).inc(prompt_tokens)
                         try:
                             self.token_budget_remaining.dec(float(prompt_tokens))
                         except Exception:
                             pass
                     if completion_tokens > 0:
-                        self.model_tokens.labels(model_name=model_name, type="completion").inc(completion_tokens)
+                        self.model_tokens.labels(
+                            model_name=model_name, type="completion"
+                        ).inc(completion_tokens)
                         try:
                             self.token_budget_remaining.dec(float(completion_tokens))
                         except Exception:
@@ -236,10 +258,14 @@ class MetricsCollector:
                     raise
                 finally:
                     duration = time.time() - start_time
-                    self.model_requests.labels(model_name=model_name, status=status).inc()
+                    self.model_requests.labels(
+                        model_name=model_name, status=status
+                    ).inc()
                     self.model_latency.labels(model_name=model_name).observe(duration)
                     self._try_push("models")
+
             return wrapper
+
         return decorator
 
     def track_terraform_plan(self):
@@ -259,7 +285,9 @@ class MetricsCollector:
                     self.terraform_plans.labels(status=status).inc()
                     self.terraform_plan_duration.observe(duration)
                     self._try_push("terraform")
+
             return wrapper
+
         return decorator
 
     # ---- direct record helpers (unchanged interface) ----
@@ -280,7 +308,7 @@ class MetricsCollector:
         self._try_push("sessions")
 
     def get_metrics(self) -> str:
-        return generate_latest(self.registry).decode('utf-8')
+        return generate_latest(self.registry).decode("utf-8")
 
     def get_metrics_summary(self) -> Dict[str, Any]:
         try:

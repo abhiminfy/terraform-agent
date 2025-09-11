@@ -9,7 +9,12 @@ import tempfile
 from typing import Any, Dict, Optional, Tuple
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +51,11 @@ async def run_cmd_async(
     except asyncio.TimeoutError as e:
         proc.kill()
         raise RuntimeError(f"Command timed out: {' '.join(args)}") from e
-    return proc.returncode, stdout.decode("utf-8", "replace"), stderr.decode("utf-8", "replace")
+    return (
+        proc.returncode,
+        stdout.decode("utf-8", "replace"),
+        stderr.decode("utf-8", "replace"),
+    )
 
 
 @retry(
@@ -55,7 +64,9 @@ async def run_cmd_async(
     wait=wait_exponential(multiplier=1, min=1, max=10),
     retry=retry_if_exception_type((httpx.ConnectError, httpx.ReadTimeout)),
 )
-async def http_json_get(url: str, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+async def http_json_get(
+    url: str, headers: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
     async with httpx.AsyncClient(timeout=20.0) as client:
         resp = await client.get(url, headers=headers)
         resp.raise_for_status()

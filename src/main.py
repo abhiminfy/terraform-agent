@@ -1,4 +1,3 @@
-
 import os
 import sys
 import traceback
@@ -45,7 +44,7 @@ app = FastAPI(
     description="AI-powered Terraform code generator using Strands Agents framework",
     version="2.0.1",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
 )
 
 # FIXED: Simplified CORS configuration - removed conflicting middleware
@@ -58,6 +57,7 @@ app.add_middleware(
 )
 
 # REMOVED: Duplicate CORS middleware that was causing conflicts
+
 
 def _add_bearer_auth(app):
     def custom_openapi():
@@ -84,7 +84,9 @@ def _add_bearer_auth(app):
 
     app.openapi = custom_openapi
 
+
 _add_bearer_auth(app)
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -94,16 +96,17 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Exception message: {str(exc)}")
     logger.error("Full traceback:")
     logger.error(traceback.format_exc())
-    
+
     return JSONResponse(
         status_code=500,
         content={
             "status": "error",
-            "type": "server_error", 
+            "type": "server_error",
             "error": f"Internal server error: {str(exc)}",
-            "exception_type": type(exc).__name__
-        }
+            "exception_type": type(exc).__name__,
+        },
     )
+
 
 @app.get("/")
 def read_root():
@@ -115,14 +118,16 @@ def read_root():
         "status": "operational",
         "endpoints": {
             "health": "/health",
-            "test": "/test", 
+            "test": "/test",
             "chat": "/chat",
             "streaming": "/chat/stream",
-            "docs": "/docs"
-        }
+            "docs": "/docs",
+        },
     }
 
+
 # Removed @app.get("/health") to avoid conflict with routes.py version
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -132,25 +137,30 @@ async def startup_event():
     logger.info(f"[KEY] API Key configured: {bool(os.getenv('GEMINI_API_KEY'))}")
     logger.info("[OK] Terraform AI Agent started successfully")
 
-@app.on_event("shutdown") 
+
+@app.on_event("shutdown")
 async def shutdown_event():
     """Shutdown event handler"""
     logger.info("[STOP] Shutting down Terraform AI Agent...")
 
+
 # Include the main router
 app.include_router(router, prefix="", tags=["main"])
+
 
 # Additional middleware for request logging
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log all incoming requests"""
     start_time = time.time()
-    
+
     logger.info(f"[IN] {request.method} {request.url.path}")
-    
+
     response = await call_next(request)
-    
+
     process_time = time.time() - start_time
-    logger.info(f"[OUT] {request.method} {request.url.path} - {response.status_code} ({process_time:.2f}s)")
-    
+    logger.info(
+        f"[OUT] {request.method} {request.url.path} - {response.status_code} ({process_time:.2f}s)"
+    )
+
     return response

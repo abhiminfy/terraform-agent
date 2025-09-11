@@ -19,4 +19,3 @@ def load_dotenv(path: Optional[str] = None, *args: Any, **kwargs: Any) -> bool:
         False, indicating that no .env file was loaded.
     """
     return False
-    
