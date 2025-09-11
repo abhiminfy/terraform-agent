@@ -1432,20 +1432,22 @@ import httpx as _rt_httpx
 import jwt as _rt_jwt
 from backend.app.core.config import Settings as _RT_Settings
 from backend.app.services.background import celery_app as _rt_celery
-from backend.app.services.github_integration import \
-    enable_auto_apply_action as _rt_enable_actions
-from backend.app.services.github_integration import \
-    trufflehog_scan_ref as _rt_truffle
-from backend.app.services.infracost_integration import \
-    estimate_cost_async_v2 as _rt_cost_v2
-from backend.app.services.policy_engine import \
-    validate_terraform_code_ast as _rt_validate_ast
+from backend.app.services.github_integration import (
+    enable_auto_apply_action as _rt_enable_actions,
+)
+from backend.app.services.github_integration import trufflehog_scan_ref as _rt_truffle
+from backend.app.services.infracost_integration import (
+    estimate_cost_async_v2 as _rt_cost_v2,
+)
+from backend.app.services.policy_engine import (
+    validate_terraform_code_ast as _rt_validate_ast,
+)
 from backend.app.services.strands_agent import chat_secure as _rt_chat_secure
-from backend.app.services.strands_agent import \
-    generate_tf_unit_tests as _rt_ai_tests
+from backend.app.services.strands_agent import generate_tf_unit_tests as _rt_ai_tests
 from backend.app.utils.utils import run_cmd_async as _rt_run_cmd_async
 from backend.app.utils.utils import sanitize_user_text as _rt_sanitize
 from backend.app.utils.utils import secure_tempdir as _rt_secure_tempdir
+
 # ---------------------------
 # SECURE/JWT endpoints (not decorated by metrics)
 # ---------------------------

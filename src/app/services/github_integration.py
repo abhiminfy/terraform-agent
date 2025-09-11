@@ -527,8 +527,7 @@ class GitHubIntegration:
             "summary": "",
         }
         try:
-            from backend.app.services.infracost_integration import \
-                infracost_integration
+            from backend.app.services.infracost_integration import infracost_integration
             from backend.app.services.policy_engine import policy_engine
             from strands_tools import terraform_validator
 

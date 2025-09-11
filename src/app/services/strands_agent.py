@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+
 # --- UTF-8 bootstrap for Windows consoles with emojis in logs ---
 import sys
 import tempfile
@@ -15,9 +16,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import google.generativeai as genai
 from dotenv import load_dotenv
-from strands_tools import (calculator, file_operations,
-                           infrastructure_analyzer, plan_analyzer,
-                           static_sanity_checks, terraform_validator)
+from strands_tools import (
+    calculator,
+    file_operations,
+    infrastructure_analyzer,
+    plan_analyzer,
+    static_sanity_checks,
+    terraform_validator,
+)
 
 from src.app.core.metrics import metrics
 from src.app.services.github_integration import github_integration

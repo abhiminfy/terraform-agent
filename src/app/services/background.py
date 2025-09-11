@@ -3,7 +3,9 @@ import asyncio
 
 from backend.app.core.config import Settings
 from backend.app.services.infracost_integration import (  # existing object if any; appended below
-    estimate_cost_async_v2, infracost_integration)
+    estimate_cost_async_v2,
+    infracost_integration,
+)
 from backend.app.utils.utils import run_cmd_async, secure_tempdir
 from celery import Celery
 
