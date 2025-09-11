@@ -1,0 +1,27 @@
+{
+  "chat_id": "oai-89b61ab4",
+  "created_at": "2025-09-09T04:46:34.051558",
+  "last_updated": "2025-09-09T04:46:36.360114",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "hello",
+      "timestamp": "2025-09-09T04:46:34.051576",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "Hello again!  Is there anything I can help you with today regarding Terraform or infrastructure?",
+      "timestamp": "2025-09-09T04:46:36.359293",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.05
+      }
+    }
+  ],
+  "title": "Terraform Code",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

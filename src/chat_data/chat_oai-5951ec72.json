@@ -1,0 +1,18 @@
+{
+  "chat_id": "oai-5951ec72",
+  "created_at": "2025-09-09T06:20:51.476844",
+  "last_updated": "2025-09-09T06:20:51.476882",
+  "message_count": 1,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Can you provide example Terraform code to create an S3 bucket named \"test-bucket-123\" with versioning enabled?",
+      "timestamp": "2025-09-09T06:20:51.476876",
+      "metadata": {}
+    }
+  ],
+  "title": "",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

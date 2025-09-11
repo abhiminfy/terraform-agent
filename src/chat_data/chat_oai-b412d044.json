@@ -1,0 +1,24 @@
+{
+  "chat_id": "oai-b412d044",
+  "created_at": "2025-09-09T10:33:06.017417",
+  "last_updated": "2025-09-09T10:33:06.082160",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "@router.get(\"/agent/autopilot/stream\")\nasync def agent_autopilot_stream(\n    goal: str = Query(..., description=\"High level objective, e.g. 'Create a VPC with two subnets and plan'\"),\n    allow_apply: bool = Query(False, description=\"If true, agent may run terraform apply\"),\n):\n    if autopilot_agent is None:\n        raise HTTPException(status_code=500, detail=\"Autopilot not initialized\")\n    async def gen():\n        # bridge sync on_event -> async queue\n        q: asyncio.Queue = asyncio.Queue()\n        def on_event(ev: Dict[str, Any]): asyncio.create_task(q.put(ev))\n        task = asyncio.create_task(autopilot_agent.run(goal, allow_apply=allow_apply, on_event=on_event))\n        done = False\n        while not done:\n            try:\n                ev = await asyncio.wait_for(q.get(), timeout=0.25)\n                yield f\"data: {json.dumps({'event': ev})}\\n\\n\"\n            except asyncio.TimeoutError:\n                pass\n            if task.done():\n                res = await task\n                yield f\"data: {json.dumps({'done': True, 'result': res})}\\n\\n\"\n                done = True\n    return StreamingResponse(\n        gen(),\n        media_type=\"text/event-stream\",\n        headers={\"Cache-Control\":\"no-cache\",\"Connection\":\"keep-alive\",\"X-Accel-Buffering\":\"no\"},\n    )",
+      "timestamp": "2025-09-09T10:33:06.017444",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "I need more information: Which AWS region would you like to use?\nIs this for development, staging, or production?",
+      "timestamp": "2025-09-09T10:33:06.082089",
+      "metadata": {}
+    }
+  ],
+  "title": "VPC Setup",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

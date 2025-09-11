@@ -1,0 +1,18 @@
+{
+  "chat_id": "oai-ef2a050a",
+  "created_at": "2025-09-08T11:52:21.219404",
+  "last_updated": "2025-09-08T11:52:21.219425",
+  "message_count": 1,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Create an AWS S3 bucket named `my-demo-bucket-1234` in `us-east-1` with versioning and default encryption (SSE-S3). Output Terraform.",
+      "timestamp": "2025-09-08T11:52:21.219421",
+      "metadata": {}
+    }
+  ],
+  "title": "",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

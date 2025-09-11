@@ -1,0 +1,27 @@
+{
+  "chat_id": "oai-c8a4d0e7",
+  "created_at": "2025-09-08T12:20:44.274843",
+  "last_updated": "2025-09-08T12:20:46.131407",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "### Task:\nGenerate a concise, 3-5 word title with an emoji summarizing the chat history.\n### Guidelines:\n- The title should clearly represent the main theme or subject of the conversation.\n- Use emojis that enhance understanding of the topic, but avoid quotation marks or special formatting.\n- Write the title in the chat's primary language; default to English if multilingual.\n- Prioritize accuracy over excessive creativity; keep it clear and simple.\n- Your entire response must consist solely of the JSON object, without any introductory or concluding text.\n- The output must be a single, raw JSON object, without any markdown code fences or other encapsulating text.\n- Ensure no conversational text, affirmations, or explanations precede or follow the raw JSON output, as this will cause direct parsing failure.\n### Output:\nJSON format: { \"title\": \"your concise title here\" }\n### Examples:\n- { \"title\": \"📉 Stock Market Trends\" },\n- { \"title\": \"🍪 Perfect Chocolate Chip Recipe\" },\n- { \"title\": \"Evolution of Music Streaming\" },\n- { \"title\": \"Remote Work Productivity Tips\" },\n- { \"title\": \"Artificial Intelligence in Healthcare\" },\n- { \"title\": \"🎮 Video Game Development Insights\" }\n### Chat History:\n<chat_history>\nUSER: Say hello in one sentence.\nASSISTANT: Hello!\n</chat_history>",
+      "timestamp": "2025-09-08T12:20:44.274856",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "{\"title\": \"👋 Simple Hello Exchange\"}",
+      "timestamp": "2025-09-08T12:20:46.131325",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.05
+      }
+    }
+  ],
+  "title": "### Task: Generate a concise,",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

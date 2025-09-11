@@ -1,0 +1,18 @@
+{
+  "chat_id": "df16d5ec-a620-426c-a374-df2c0ca467ad",
+  "created_at": "2025-09-03T22:10:18.687003",
+  "last_updated": "2025-09-03T22:10:18.687003",
+  "message_count": 1,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Please incorporate the attached file **variables.tf**:\n\n```hcl\nvariable \"region\" { type = string }\r\nvariable \"vpc_cidr\" { type = string }\r\nvariable \"availability_zones\" { type = list(string) }\r\nvariable \"allowed_http_cidrs\" { type = list(string) }\r\nvariable \"desired_count\" { type = number }\r\nvariable \"task_cpu\" { type = number }\r\nvariable \"task_memory\" { type = number }\r\nvariable \"container_image\" { type = string }\r\nvariable \"container_port\" { type = number }\r\nvariable \"tags\" { type = map(string) }\r\n\n```\nExplain any changes needed and propose a plan.",
+      "timestamp": "2025-09-03T22:10:18.687003",
+      "metadata": {}
+    }
+  ],
+  "title": "",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

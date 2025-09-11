@@ -1,0 +1,24 @@
+{
+  "chat_id": "oai-15d1247a",
+  "created_at": "2025-09-11T07:39:13.419702",
+  "last_updated": "2025-09-11T07:39:13.437852",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "How can I add more resources like security groups or EBS volumes to this EC2 instance?",
+      "timestamp": "2025-09-11T07:39:13.419721",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "I need more information: Which AWS region would you like to use?\nIs this for development, staging, or production?\nWhat instance size do you need? (e.g., t3.micro, t3.small)",
+      "timestamp": "2025-09-11T07:39:13.437825",
+      "metadata": {}
+    }
+  ],
+  "title": "EC2 Instance",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

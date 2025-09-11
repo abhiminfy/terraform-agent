@@ -1,0 +1,27 @@
+{
+  "chat_id": "oai-db7ed0a9",
+  "created_at": "2025-09-08T10:33:06.003190",
+  "last_updated": "2025-09-08T10:33:09.463338",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "hi there",
+      "timestamp": "2025-09-08T10:33:06.003278",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "Hi there! How can I help you today?",
+      "timestamp": "2025-09-08T10:33:09.463261",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.05
+      }
+    }
+  ],
+  "title": "Hi there",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

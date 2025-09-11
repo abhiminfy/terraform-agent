@@ -1,0 +1,24 @@
+{
+  "chat_id": "1c03339c-d217-4022-83df-cb69377d44c1",
+  "created_at": "2025-09-04T11:36:44.276940",
+  "last_updated": "2025-09-04T11:42:15.632059",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Plan only: create an EC2 t3.micro in ap-south-1 in the default VPC. Do not ask for IDs. Use data sources: latest Amazon Linux 2 x86_64 gp3 AMI, default VPC, first public subnet. Security group name web-80-sg allowing tcp/80 from 0.0.0.0/0; egress all. No key_name. Require IMDSv2. Root volume encrypted gp3 size 8. After generating HCL run: terraform fmt -check; terraform validate; terraform plan -detailed-exitcode -no-color. Return fmt/validate status, plan exit code, plan summary, and first 40 lines of the diff. Do not apply.",
+      "timestamp": "2025-09-04T11:36:44.276940",
+      "metadata": {}
+    },
+    {
+      "role": "user",
+      "content": "terraform {\n  required_version = \">= 1.4.0\"\n  required_providers {\n    aws = {\n      source  = \"hashicorp/aws\"\n      version = \"~> 5.0\"\n    }\n  }\n}\n\nprovider \"aws\" { region = \"ap-south-1\" }\n\n# Latest Amazon Linux 2 x86_64, gp3\ndata \"aws_ami\" \"al2\" {\n  most_recent = true\n  owners      = [\"amazon\"]\n  filter { name = \"name\"                 values = [\"amzn2-ami-hvm-*-x86_64-gp3\"] }\n  filter { name = \"virtualization-type\"  values = [\"hvm\"] }\n  filter { name = \"architecture\"         values = [\"x86_64\"] }\n}\n\ndata \"aws_vpc\" \"default\" { default = true }\n\ndata \"aws_subnets\" \"default\" {\n  filter { name = \"vpc-id\" values = [data.aws_vpc.default.id] }\n}\n\nresource \"aws_security_group\" \"web_80_sg\" {\n  name        = \"web-80-sg\"\n  description = \"Allow HTTP inbound traffic\"\n  vpc_id      = data.aws_vpc.default.id\n\n  ingress { from_port = 80 to_port = 80 protocol = \"tcp\" cidr_blocks = [\"0.0.0.0/0\"] }\n  egress  { from_port = 0  to_port = 0  protocol = \"-1\"  cidr_blocks = [\"0.0.0.0/0\"] }\n}\n\nresource \"aws_instance\" \"web\" {\n  ami                    = data.aws_ami.al2.id\n  instance_type          = \"t3.micro\"\n  subnet_id              = data.aws_subnets.default.ids[0]\n  vpc_security_group_ids = [aws_security_group.web_80_sg.id]\n  associate_public_ip_address = true\n\n  metadata_options {\n    http_endpoint               = \"enabled\"\n    http_tokens                 = \"required\"\n    http_put_response_hop_limit = 1\n  }\n\n  root_block_device {\n    encrypted   = true\n    volume_type = \"gp3\"\n    volume_size = 8\n  }\n\n  tags = { Name = \"web-ec2\" }\n}\n\noutput \"instance_public_ip\" { value = aws_instance.web.public_ip }\nUse the corrected HCL above exactly. Then run: terraform fmt -check, terraform validate, and terraform plan -detailed-exitcode -no-color in a temp dir. Do not apply. Return fmt/validate status, plan exit code, the one-line plan summary, and the first ~40 lines of the diff",
+      "timestamp": "2025-09-04T11:42:15.632059",
+      "metadata": {}
+    }
+  ],
+  "title": "",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

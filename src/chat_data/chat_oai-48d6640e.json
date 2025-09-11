@@ -1,0 +1,24 @@
+{
+  "chat_id": "oai-48d6640e",
+  "created_at": "2025-09-09T06:21:42.659019",
+  "last_updated": "2025-09-09T06:21:47.850157",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "### Task:\nSuggest 3-5 relevant follow-up questions or prompts that the user might naturally ask next in this conversation as a **user**, based on the chat history, to help continue or deepen the discussion.\n### Guidelines:\n- Write all follow-up questions from the user’s point of view, directed to the assistant.\n- Make questions concise, clear, and directly related to the discussed topic(s).\n- Only suggest follow-ups that make sense given the chat content and do not repeat what was already covered.\n- If the conversation is very short or not specific, suggest more general (but relevant) follow-ups the user might ask.\n- Use the conversation's primary language; default to English if multilingual.\n- Response must be a JSON array of strings, no extra text or formatting.\n### Output:\nJSON format: { \"follow_ups\": [\"Question 1?\", \"Question 2?\", \"Question 3?\"] }\n### Chat History:\n<chat_history>\nUSER: hello\nASSISTANT: Hello again!  Is there anything I can help you with today regarding Terraform or infrastructure?\nUSER: Can you provide example Terraform code to create an S3 bucket named \"test-bucket-123\" with versioning enabled?\nASSISTANT: ⚠️ Generated Terraform code has validation errors - fixes needed:\nUSER: Can you provide example Terraform code to create an S3 bucket named \"test-bucket-123\" with versioning enabled?\nASSISTANT: ⚠️ Generated Terraform code has validation errors - fixes needed:\n</chat_history>",
+      "timestamp": "2025-09-09T06:21:42.659042",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "I need clarification: ```json\n{\n  \"follow_ups\": [\n    \"1. What specific validation errors are you encountering? Can you share the error messages?\",\n    \"2. Can you share the Terraform code you're trying to use?\",\n    \"3. What version of Terraform are you using?\"\n  ]\n}\n```",
+      "timestamp": "2025-09-09T06:21:47.850066",
+      "metadata": {}
+    }
+  ],
+  "title": "S3 Bucket",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

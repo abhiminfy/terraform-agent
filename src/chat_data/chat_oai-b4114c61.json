@@ -1,0 +1,18 @@
+{
+  "chat_id": "oai-b4114c61",
+  "created_at": "2025-09-09T09:48:03.280037",
+  "last_updated": "2025-09-09T09:48:03.280860",
+  "message_count": 1,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Make a minimal AWS EC2 t3.micro in `us-east-1` with keyless SSH (SSM only). Output public IP. Plan only",
+      "timestamp": "2025-09-09T09:48:03.280714",
+      "metadata": {}
+    }
+  ],
+  "title": "",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

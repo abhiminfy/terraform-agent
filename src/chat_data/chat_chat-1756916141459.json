@@ -1,0 +1,45 @@
+{
+  "chat_id": "chat-1756916141459",
+  "created_at": "2025-09-03T21:46:03.950709",
+  "last_updated": "2025-09-03T21:50:41.271828",
+  "message_count": 5,
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey",
+      "timestamp": "2025-09-03T21:46:03.952849",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "Hey there!  What can I help you with today?",
+      "timestamp": "2025-09-03T21:46:07.459013",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.05
+      }
+    },
+    {
+      "role": "user",
+      "content": "Create a Terraform configuration for deploying a highly available web application on AWS. Use an EC2 Auto Scaling Group with a Load Balancer in front. The instances should run Ubuntu with Nginx installed. Add an S3 bucket for storing logs. Also, give me an estimated monthly cost",
+      "timestamp": "2025-09-03T21:49:54.537512",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "I need more information: Which AWS region would you like to use?\nIs this for development, staging, or production?\nWhat instance size do you need? (e.g., t3.micro, t3.small)",
+      "timestamp": "2025-09-03T21:49:54.569946",
+      "metadata": {}
+    },
+    {
+      "role": "user",
+      "content": "Instance type: t3.micro\n\nRegion: us-east-1\n\nDesired capacity: 2\n\nStorage requirements: 50 GB (for the S3 bucket)\n\nTraffic expectations: 100,000 requests/month\n\nEBS volume size: 20 GB",
+      "timestamp": "2025-09-03T21:50:41.271828",
+      "metadata": {}
+    }
+  ],
+  "title": "New Chat",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

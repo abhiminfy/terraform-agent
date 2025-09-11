@@ -1,0 +1,18 @@
+{
+  "chat_id": "oai-a8016221",
+  "created_at": "2025-09-08T12:21:20.908815",
+  "last_updated": "2025-09-08T12:21:20.908842",
+  "message_count": 1,
+  "messages": [
+    {
+      "role": "user",
+      "content": "*   `Generate HCL only for an aws_s3_bucket named demo-xyz with versioning enabled in us-east-1. No comments.`",
+      "timestamp": "2025-09-08T12:21:20.908837",
+      "metadata": {}
+    }
+  ],
+  "title": "",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

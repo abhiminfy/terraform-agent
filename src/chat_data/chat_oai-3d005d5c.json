@@ -1,0 +1,18 @@
+{
+  "chat_id": "oai-3d005d5c",
+  "created_at": "2025-09-08T12:35:41.950945",
+  "last_updated": "2025-09-08T12:35:41.951039",
+  "message_count": 1,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Create an S3 bucket named \"test-bucket-123\" with versioning enabled",
+      "timestamp": "2025-09-08T12:35:41.951013",
+      "metadata": {}
+    }
+  ],
+  "title": "",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

@@ -1,0 +1,27 @@
+{
+  "chat_id": "oai-487f9a93",
+  "created_at": "2025-09-09T07:55:32.299870",
+  "last_updated": "2025-09-09T07:55:43.039272",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "what if i want to create a similar one for azure?",
+      "timestamp": "2025-09-09T07:55:32.299887",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "```terraform\n# Configure the Azure provider\nterraform {\n  required_providers {\n    azurerm = {\n      source  = \"hashicorp/azurerm\"\n      version = \"~> 3.0\"\n    }\n  }\n}\n\nprovider \"azurerm\" {\n  features {}\n}\n\n# Create a resource group\nresource \"azurerm_resource_group\" \"example\" {\n  name     = \"example-resource-group\"\n  location = \"West US 2\"\n}\n\n# Create a virtual network\nresource \"azurerm_virtual_network\" \"example\" {\n  name                = \"example-network\"\n  address_space       = [\"10.0.0.0/16\"]\n  location            = azurerm_resource_group.example.location\n  resource_group_name = azurerm_resource_group.example.name\n}\n\n# Create a subnet\nresource \"azurerm_subnet\" \"example\" {\n  name                 = \"internal\"\n  resource_group_name  = azurerm_resource_group.example.name\n  virtual_network_name = azurerm_virtual_network.example.name\n  address_prefixes     = [\"10.0.2.0/24\"]\n}\n\n# Create a network interface\nresource \"azurerm_network_interface\" \"example\" {\n  name                = \"example-nic\"\n  location            = azurerm_resource_group.example.location\n  resource_group_name = azurerm_resource_group.example.name\n\n  ip_configuration {\n    name                          = \"internal\"\n    subnet_id                     = azurerm_subnet.example.id\n    private_ip_address_allocation = \"Dynamic\"\n  }\n}\n\n# Create a Linux virtual machine\nresource \"azurerm_linux_virtual_machine\" \"example\" {\n  name                            = \"example-vm\"\n  resource_group_name            = azurerm_resource_group.example.name\n  location                        = azurerm_resource_group.example.location\n  size                            = \"Standard_B1s\"\n  admin_username                  = \"adminuser\"\n  disable_password_authentication = true\n  network_interface_ids          = [azurerm_network_interface.example.id]\n\n  os_disk {\n    caching              = \"ReadWrite\"\n    storage_account_type = \"Standard_LRS\"\n  }\n\n  source_image_reference {\n    publisher = \"Canonical\"\n    offer     = \"UbuntuServer\"\n    sku       = \"18.04-LTS\"\n    version   = \"latest\"\n  }\n\n  admin_ssh_key {\n    username   = \"adminuser\"\n    public_key = file(\"~/.ssh/id_rsa.pub\") # Replace with your public key file\n  }\n}\n```\n\nThis creates a basic Linux VM in Azure. Remember to replace `file(\"~/.ssh/id_rsa.pub\")` with the path to your actual public SSH key.  Let me know if you had a different resource in mind!",
+      "timestamp": "2025-09-09T07:55:43.039210",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.5
+      }
+    }
+  ],
+  "title": "Terraform Code",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

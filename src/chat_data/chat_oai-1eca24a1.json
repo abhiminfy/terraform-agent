@@ -1,0 +1,27 @@
+{
+  "chat_id": "oai-1eca24a1",
+  "created_at": "2025-09-09T10:33:44.770996",
+  "last_updated": "2025-09-09T10:33:46.567716",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "are you listening what i am saying?",
+      "timestamp": "2025-09-09T10:33:44.771016",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "Yes, I am processing your input and responding accordingly. How can I help you today?",
+      "timestamp": "2025-09-09T10:33:46.567636",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.05
+      }
+    }
+  ],
+  "title": "Are you listening what i",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

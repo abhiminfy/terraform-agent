@@ -1,0 +1,27 @@
+{
+  "chat_id": "oai-be679975",
+  "created_at": "2025-09-11T07:38:14.780834",
+  "last_updated": "2025-09-11T07:38:16.290901",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello",
+      "timestamp": "2025-09-11T07:38:14.780981",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "Hello!",
+      "timestamp": "2025-09-11T07:38:16.290483",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.05
+      }
+    }
+  ],
+  "title": "New Chat",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

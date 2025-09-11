@@ -1,0 +1,27 @@
+{
+  "chat_id": "oai-bef0ae65",
+  "created_at": "2025-09-11T07:39:26.686535",
+  "last_updated": "2025-09-11T07:39:28.928095",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "ohh okay",
+      "timestamp": "2025-09-11T07:39:26.686550",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "Okay, I understand.  Is there anything else I can help you with?",
+      "timestamp": "2025-09-11T07:39:28.928067",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.05
+      }
+    }
+  ],
+  "title": "Ohh okay",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

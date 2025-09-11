@@ -1,0 +1,27 @@
+{
+  "chat_id": "oai-968a184f",
+  "created_at": "2025-09-09T07:51:51.688730",
+  "last_updated": "2025-09-09T07:51:55.318935",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "### Task:\nSuggest 3-5 relevant follow-up questions or prompts that the user might naturally ask next in this conversation as a **user**, based on the chat history, to help continue or deepen the discussion.\n### Guidelines:\n- Write all follow-up questions from the user’s point of view, directed to the assistant.\n- Make questions concise, clear, and directly related to the discussed topic(s).\n- Only suggest follow-ups that make sense given the chat content and do not repeat what was already covered.\n- If the conversation is very short or not specific, suggest more general (but relevant) follow-ups the user might ask.\n- Use the conversation's primary language; default to English if multilingual.\n- Response must be a JSON array of strings, no extra text or formatting.\n### Output:\nJSON format: { \"follow_ups\": [\"Question 1?\", \"Question 2?\", \"Question 3?\"] }\n### Chat History:\n<chat_history>\nUSER: Hi\nASSISTANT: Message too short\n</chat_history>",
+      "timestamp": "2025-09-09T07:51:51.688758",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "```json\n{\n  \"follow_ups\": [\n    \"What can you do?\",\n    \"Can you give me an example of how to use Terraform to create an AWS S3 bucket?\",\n    \"How do I get started with Terraform?\",\n    \"What are some best practices for using Terraform?\",\n    \"Can you explain the concept of Terraform state?\"\n  ]\n}\n```",
+      "timestamp": "2025-09-09T07:51:55.318890",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.35
+      }
+    }
+  ],
+  "title": "S3 Bucket",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

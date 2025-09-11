@@ -1,0 +1,51 @@
+﻿# ---- FastAPI stack ----
+fastapi>=0.110
+uvicorn[standard]>=0.29
+starlette>=0.37
+pydantic>=2.6
+pydantic-settings>=2.3
+
+# ---- Metrics / Prometheus ----
+prometheus-client>=0.20
+
+# ---- Rate limiting ----
+slowapi>=0.1.9
+limits>=3.10.1
+
+# ---- HCL / IaC parsing ----
+python-hcl2>=4.3.5
+
+# ---- Async HTTP + retries + caching ----
+httpx>=0.27
+tenacity>=8.2
+cachetools>=5.3
+
+# ---- Auth ----
+PyJWT>=2.8
+
+# ---- Task queue ----
+celery[redis]>=5.3
+redis>=5.0
+
+# ---- Cloud / auditing (optional but used by code paths) ----
+boto3>=1.34
+
+# ---- GitHub integration (optional helper; you can still use raw HTTP) ----
+PyGithub>=2.3.0
+requests>=2.32
+
+# ---- AI (Gemini client + OSS fallback) ----
+google-generativeai>=0.6.0
+transformers>=4.41.0
+torch>=2.2.2
+
+# ---- Security scanners (Python-installed ones; tfsec/trufflehog are CLI binaries) ----
+checkov>=3.2.0
+
+# ---- Testing / linting (useful for local + CI) ----
+pytest>=8.2
+pytest-asyncio>=0.23
+black>=24.4
+isort>=5.13
+flake8>=7.0
+mypy>=1.10

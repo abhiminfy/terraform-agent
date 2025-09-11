@@ -1,0 +1,24 @@
+{
+  "chat_id": "oai-b2ee5a00",
+  "created_at": "2025-09-09T10:33:27.857683",
+  "last_updated": "2025-09-09T10:33:27.899321",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "it wasnt for terraform tho",
+      "timestamp": "2025-09-09T10:33:27.857703",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "I need more information: Which AWS region would you like to use?\nIs this for development, staging, or production?",
+      "timestamp": "2025-09-09T10:33:27.899276",
+      "metadata": {}
+    }
+  ],
+  "title": "Terraform Code",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

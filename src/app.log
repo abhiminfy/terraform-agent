@@ -1,0 +1,2 @@
+2025-08-14 16:38:32,903 - routes - INFO - [OK] TerraformAgent initialized successfully
+2025-08-14 16:38:32,903 - routes - INFO - APIRouter.middleware not available; app-level middleware will handle request IDs

@@ -1,0 +1,24 @@
+{
+  "chat_id": "oai-3b97fd78",
+  "created_at": "2025-09-09T04:46:30.734532",
+  "last_updated": "2025-09-09T04:46:38.567333",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "### Task:\nSuggest 3-5 relevant follow-up questions or prompts that the user might naturally ask next in this conversation as a **user**, based on the chat history, to help continue or deepen the discussion.\n### Guidelines:\n- Write all follow-up questions from the user’s point of view, directed to the assistant.\n- Make questions concise, clear, and directly related to the discussed topic(s).\n- Only suggest follow-ups that make sense given the chat content and do not repeat what was already covered.\n- If the conversation is very short or not specific, suggest more general (but relevant) follow-ups the user might ask.\n- Use the conversation's primary language; default to English if multilingual.\n- Response must be a JSON array of strings, no extra text or formatting.\n### Output:\nJSON format: { \"follow_ups\": [\"Question 1?\", \"Question 2?\", \"Question 3?\"] }\n### Chat History:\n<chat_history>\nUSER: *   `Generate HCL only for an aws_s3_bucket named demo-xyz with versioning enabled in us-east-1. No comments.`\nASSISTANT: ⚠️ Generated Terraform code has validation errors - fixes needed:\nUSER: Create an S3 bucket named \"test-bucket-123\" with versioning enabled\nASSISTANT: ⚠️ Generated Terraform code has validation errors - fixes needed:\nUSER: hi\nASSISTANT: Message too short\n</chat_history>",
+      "timestamp": "2025-09-09T04:46:30.734635",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "I need clarification: ```json\n{\n  \"follow_ups\": [\n    \"1. What AWS services, besides S3, are typically used in conjunction with a versioned S3 bucket for a production environment?\",\n    \"2. If I need to access files in this bucket frequently, what are the recommended instance sizes/types for optimal performance?\",\n    \"3. What networking considerations, such as VPC endpoints or security groups, should I be aware of when setting up a versioned S3 bucket?\"\n  ]\n}\n```",
+      "timestamp": "2025-09-09T04:46:38.567242",
+      "metadata": {}
+    }
+  ],
+  "title": "S3 Bucket",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

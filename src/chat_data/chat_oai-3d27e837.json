@@ -1,0 +1,27 @@
+{
+  "chat_id": "oai-3d27e837",
+  "created_at": "2025-09-11T07:38:16.379567",
+  "last_updated": "2025-09-11T07:38:19.334799",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "### Task:\nSuggest 3-5 relevant follow-up questions or prompts that the user might naturally ask next in this conversation as a **user**, based on the chat history, to help continue or deepen the discussion.\n### Guidelines:\n- Write all follow-up questions from the user’s point of view, directed to the assistant.\n- Make questions concise, clear, and directly related to the discussed topic(s).\n- Only suggest follow-ups that make sense given the chat content and do not repeat what was already covered.\n- If the conversation is very short or not specific, suggest more general (but relevant) follow-ups the user might ask.\n- Use the conversation's primary language; default to English if multilingual.\n- Response must be a JSON array of strings, no extra text or formatting.\n### Output:\nJSON format: { \"follow_ups\": [\"Question 1?\", \"Question 2?\", \"Question 3?\"] }\n### Chat History:\n<chat_history>\nUSER: Hello\nASSISTANT: Hello!\n</chat_history>",
+      "timestamp": "2025-09-11T07:38:16.379589",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "```json\n{\n  \"follow_ups\": [\n    \"How can I help you today?\",\n    \"Is there anything specific you'd like to discuss?\",\n    \"What are your areas of expertise?\",\n    \"Do you have any examples of how you've helped other users?\",\n    \"What kind of tasks are you best suited for?\"\n  ]\n}\n```",
+      "timestamp": "2025-09-11T07:38:19.334098",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.35
+      }
+    }
+  ],
+  "title": "### Task: Suggest 3-5 relevant",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

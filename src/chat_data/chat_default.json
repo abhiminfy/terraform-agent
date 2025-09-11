@@ -1,0 +1,42 @@
+{
+  "chat_id": "default",
+  "created_at": "2025-09-03T21:11:06.664587",
+  "last_updated": "2025-09-03T22:09:25.197705",
+  "message_count": 4,
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey",
+      "timestamp": "2025-09-03T21:11:06.664587",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "Hey there!  How can I help you today?  Are you looking to build some infrastructure with Terraform, or do you have other questions?",
+      "timestamp": "2025-09-03T21:11:08.943642",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.2
+      }
+    },
+    {
+      "role": "user",
+      "content": "hey",
+      "timestamp": "2025-09-03T22:09:21.521692",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "Hey again!  I'm still here and ready to assist.  Perhaps you're thinking about building some infrastructure?  I can help with things like:\n\n* **Creating a basic AWS EC2 instance:**  This is a great starting point for learning Terraform.\n* **Setting up a secure S3 bucket:**  I can help ensure your data is stored safely and efficiently.\n* **Deploying a simple web application:** We can define the entire infrastructure, including load balancers and databases.",
+      "timestamp": "2025-09-03T22:09:25.197705",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.1
+      }
+    }
+  ],
+  "title": "Terraform Code",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

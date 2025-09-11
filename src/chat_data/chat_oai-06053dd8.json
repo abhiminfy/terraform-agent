@@ -1,0 +1,27 @@
+{
+  "chat_id": "oai-06053dd8",
+  "created_at": "2025-09-08T12:20:38.461915",
+  "last_updated": "2025-09-08T12:20:41.443913",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Say hello in one sentence.",
+      "timestamp": "2025-09-08T12:20:38.461932",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "Hello!",
+      "timestamp": "2025-09-08T12:20:41.443842",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.05
+      }
+    }
+  ],
+  "title": "Say hello in one sentence.",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}
