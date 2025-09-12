@@ -66,8 +66,9 @@ class GitHubIntegration:
 
             # Generate commit message if not provided
             if not commit_message:
-                commit_message = f"Update Terraform configuration - {
-                    datetime.now():%Y-%m-%d %H:%M:%S}"
+                commit_message = commit_message = (
+                    f"Update Terraform configuration - {datetime.now():%Y-%m-%d %H:%M:%S}"
+                )
 
             # Determine base branch with safe fallbacks
             base = base_branch or self._get_default_branch() or self.default_branch

@@ -153,8 +153,7 @@ provider "aws" {
                 if init_result.returncode != 0:
                     return {
                         "success": False,
-                        "error": f"Terraform init failed: {
-                            init_result.stderr}",
+                        "error": f"Terraform init failed: {init_result.stderr}",
                         "fallback_available": True,
                     }
 
@@ -170,8 +169,7 @@ provider "aws" {
                 if plan_result.returncode != 0:
                     return {
                         "success": False,
-                        "error": f"Terraform plan failed: {
-                            plan_result.stderr}",
+                        "error": f"Terraform init failed: {init_result.stderr}",
                         "fallback_available": True,
                     }
 

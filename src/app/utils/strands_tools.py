@@ -444,9 +444,10 @@ class AWSPricingTool:
         """Estimate EC2 instance costs"""
         if instance_type not in AWSPricingTool.PRICING_DATA["ec2"]:
             return {
-                "error": f"Unknown instance type: {instance_type}. Available types: {
-                    list(
-                        AWSPricingTool.PRICING_DATA['ec2'].keys())}"
+                "error": (
+                    f"Unknown instance type: {instance_type}. "
+                    f"Available types: {list(AWSPricingTool.PRICING_DATA['ec2'].keys())}"
+                )
             }
 
         hourly_rate = AWSPricingTool.PRICING_DATA["ec2"][instance_type]["hourly"]
@@ -688,8 +689,7 @@ yarn-error.log*
     def commit_changes_with_validation(message: str = None, timeout: int = 30) -> Dict[str, Any]:
         """Commit changes with pre-commit validation"""
         if not message:
-            message = f"Terraform code update - {
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            message = f"Terraform code update - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
         try:
             # Check if git is initialized
