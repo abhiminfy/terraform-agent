@@ -1,13 +1,23 @@
-# policy_engine.py - Policy-as-code implementation with tfsec/checkov integration
+# policy_engine.py - Policy-as-code implementation with tfsec/checkov
+# integration
 import json
+import json as _pe_json
 import logging
-import os
 import subprocess
 import tempfile
+from io import StringIO as _PE_StringIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
+from typing import Any as _Any
+from typing import Dict
+from typing import Dict as _Dict
+from typing import List
+from typing import List as _List
 
-import yaml
+import hcl2 as _pe_hcl2
+
+from src.app.utils.utils import run_cmd_async as _pe_run_cmd_async
+from src.app.utils.utils import secure_tempdir as _pe_secure_tempdir
 
 logger = logging.getLogger(__name__)
 
@@ -30,16 +40,12 @@ class PolicyEngine:
 
         for scanner in scanners.keys():
             try:
-                result = subprocess.run(
-                    [scanner, "--version"], capture_output=True, timeout=5
-                )
+                result = subprocess.run([scanner, "--version"], capture_output=True, timeout=5)
                 scanners[scanner] = result.returncode == 0
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 continue
 
-        logger.info(
-            f"Available security scanners: {[k for k, v in scanners.items() if v]}"
-        )
+        logger.info(f"Available security scanners: {[k for k, v in scanners.items() if v]}")
         return scanners
 
     def _load_default_policies(self) -> Dict[str, Any]:
@@ -213,14 +219,13 @@ class PolicyEngine:
                                 "severity": self._normalize_severity(
                                     issue.get("severity", "MEDIUM")
                                 ),
-                                "message": issue.get(
-                                    "description", "tfsec security issue"
-                                ),
+                                "message": issue.get("description", "tfsec security issue"),
                                 "scanner": "tfsec",
                                 "category": "security",
                                 "line": issue.get("location", {}).get("start_line"),
                                 "fix_suggestion": issue.get(
-                                    "resolution", "Review and fix security issue"
+                                    "resolution",
+                                    "Review and fix security issue",
                                 ),
                             }
                         )
@@ -248,9 +253,7 @@ class PolicyEngine:
             if result.stdout:
                 try:
                     checkov_output = json.loads(result.stdout)
-                    failed_checks = checkov_output.get("results", {}).get(
-                        "failed_checks", []
-                    )
+                    failed_checks = checkov_output.get("results", {}).get("failed_checks", [])
 
                     for check in failed_checks:
                         violations.append(
@@ -260,7 +263,8 @@ class PolicyEngine:
                                     "HIGH"
                                 ),  # Checkov doesn't provide severity
                                 "message": check.get(
-                                    "check_name", "Checkov security check failed"
+                                    "check_name",
+                                    "Checkov security check failed",
                                 ),
                                 "scanner": "checkov",
                                 "category": "security",
@@ -295,22 +299,16 @@ class PolicyEngine:
             if result.stdout:
                 try:
                     terrascan_output = json.loads(result.stdout)
-                    violations_data = terrascan_output.get("results", {}).get(
-                        "violations", []
-                    )
+                    violations_data = terrascan_output.get("results", {}).get("violations", [])
 
                     for violation in violations_data:
                         violations.append(
                             {
-                                "rule_id": violation.get(
-                                    "rule_id", "terrascan-unknown"
-                                ),
+                                "rule_id": violation.get("rule_id", "terrascan-unknown"),
                                 "severity": self._normalize_severity(
                                     violation.get("severity", "MEDIUM")
                                 ),
-                                "message": violation.get(
-                                    "description", "Terrascan security issue"
-                                ),
+                                "message": violation.get("description", "Terrascan security issue"),
                                 "scanner": "terrascan",
                                 "category": violation.get("category", "security"),
                                 "line": violation.get("line"),
@@ -333,7 +331,10 @@ class PolicyEngine:
         try:
             # Initialize tflint in the directory
             subprocess.run(
-                ["tflint", "--init"], cwd=directory, capture_output=True, timeout=30
+                ["tflint", "--init"],
+                cwd=directory,
+                capture_output=True,
+                timeout=30,
             )
 
             result = subprocess.run(
@@ -352,18 +353,14 @@ class PolicyEngine:
                     for issue in issues:
                         violations.append(
                             {
-                                "rule_id": issue.get("rule", {}).get(
-                                    "name", "tflint-unknown"
-                                ),
+                                "rule_id": issue.get("rule", {}).get("name", "tflint-unknown"),
                                 "severity": self._normalize_severity(
                                     issue.get("rule", {}).get("severity", "MEDIUM")
                                 ),
                                 "message": issue.get("message", "TFLint issue"),
                                 "scanner": "tflint",
                                 "category": "linting",
-                                "line": issue.get("range", {})
-                                .get("start", {})
-                                .get("line"),
+                                "line": issue.get("range", {}).get("start", {}).get("line"),
                                 "fix_suggestion": "Review TFLint documentation for remediation",
                             }
                         )
@@ -402,9 +399,7 @@ class PolicyEngine:
             "no_hardcoded_secrets": "Use variables, AWS Secrets Manager, or Parameter Store",
         }
 
-        return suggestions.get(
-            rule_name, "Review security best practices documentation"
-        )
+        return suggestions.get(rule_name, "Review security best practices documentation")
 
     def get_policy_summary(self) -> Dict[str, Any]:
         """Get summary of available policies and scanners"""
@@ -414,13 +409,9 @@ class PolicyEngine:
                 category: len(rules) for category, rules in self.policy_rules.items()
             },
             "external_scanners": self.enabled_scanners,
-            "total_internal_rules": sum(
-                len(rules) for rules in self.policy_rules.values()
-            ),
+            "total_internal_rules": sum(len(rules) for rules in self.policy_rules.values()),
             "scanning_capabilities": [
-                scanner
-                for scanner, available in self.enabled_scanners.items()
-                if available
+                scanner for scanner, available in self.enabled_scanners.items() if available
             ],
         }
 
@@ -457,7 +448,8 @@ class PolicyEngine:
         security_score = max(0, 100 - penalty)
 
         return {
-            "report_timestamp": "2024-01-01T00:00:00Z",  # Would use datetime.now() in real implementation
+            # Would use datetime.now() in real implementation
+            "report_timestamp": "2024-01-01T00:00:00Z",
             "terraform_code_lines": len(terraform_code.splitlines()),
             "validation_result": validation_result.get("valid", False),
             "security_score": security_score,
@@ -527,20 +519,7 @@ class PolicyEngine:
     # === APPEND: AST-based validation utilities (non-destructive) ===
 
 
-import json as _pe_json
-from io import StringIO as _PE_StringIO
-from typing import Any as _Any
-from typing import Dict as _Dict
-from typing import List as _List
-from typing import Tuple as _Tuple
-
-import hcl2 as _pe_hcl2
-from backend.app.utils.utils import run_cmd_async as _pe_run_cmd_async
-from backend.app.utils.utils import secure_tempdir as _pe_secure_tempdir
-
-_SOC2_CONTROLS = {
-    "network_segmentation": "Security groups should restrict ingress/egress broadly."
-}
+_SOC2_CONTROLS = {"network_segmentation": "Security groups should restrict ingress/egress broadly."}
 _HIPAA_CONTROLS = {"https_only": "ALB/CloudFront listeners should enforce HTTPS."}
 
 
@@ -560,9 +539,7 @@ def _pe_open_sg(ast: _Dict[str, _Any]) -> _List[str]:
                 if not isinstance(ingress, list):
                     ingress = [ingress]
                 for rule in ingress:
-                    cidrs = (rule.get("cidr_blocks") or []) + (
-                        rule.get("ipv6_cidr_blocks") or []
-                    )
+                    cidrs = (rule.get("cidr_blocks") or []) + (rule.get("ipv6_cidr_blocks") or [])
                     if "0.0.0.0/0" in cidrs or "::/0" in cidrs:
                         f.append(f"Open ingress in security group '{name}'")
     return f

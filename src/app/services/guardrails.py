@@ -1,6 +1,9 @@
 import logging
 import re
+from io import StringIO as _GR_StringIO
 from typing import Any, Dict, List, Tuple
+
+import hcl2 as _gr_hcl2
 
 logger = logging.getLogger(__name__)
 
@@ -137,9 +140,7 @@ class TerraformGuardrails:
         # Determine if valid
         is_valid = (
             pattern_matches > 0  # Has Terraform syntax
-            or (
-                aws_matches > 0 and keyword_matches > 0
-            )  # Has AWS resources and TF keywords
+            or (aws_matches > 0 and keyword_matches > 0)  # Has AWS resources and TF keywords
             or confidence > 0.5
         )
 
@@ -164,9 +165,7 @@ class TerraformGuardrails:
         issues = []
         for pattern, description in self.dangerous_patterns:
             try:
-                matches = re.finditer(
-                    pattern, terraform_code, re.IGNORECASE | re.MULTILINE
-                )
+                matches = re.finditer(pattern, terraform_code, re.IGNORECASE | re.MULTILINE)
                 for match in matches:
                     issues.append(
                         {
@@ -193,9 +192,7 @@ class TerraformGuardrails:
         else:
             return "LOW"
 
-    def filter_hallucinations(
-        self, response: str, user_message: str
-    ) -> Tuple[str, List[str]]:
+    def filter_hallucinations(self, response: str, user_message: str) -> Tuple[str, List[str]]:
         """Filter out potential hallucinations and return filtered response with warnings"""
         if not response:
             return response, ["Empty response received"]
@@ -221,14 +218,10 @@ class TerraformGuardrails:
                 try:
                     if re.search(pattern, line):
                         is_hallucination = True
-                        warnings.append(
-                            f"Filtered uncertain statement: {line.strip()[:100]}"
-                        )
+                        warnings.append(f"Filtered uncertain statement: {line.strip()[:100]}")
                         break
                 except re.error as e:
-                    logger.error(
-                        f"Regex error in hallucination pattern '{pattern}': {str(e)}"
-                    )
+                    logger.error(f"Regex error in hallucination pattern '{pattern}': {str(e)}")
                     continue
 
             # Keep the line if it's not a hallucination
@@ -239,9 +232,7 @@ class TerraformGuardrails:
 
         # If we filtered too much content, return original with warning
         if len(filtered_response.strip()) < len(response.strip()) * 0.3:
-            warnings.append(
-                "Response may contain uncertain information - please verify"
-            )
+            warnings.append("Response may contain uncertain information - please verify")
             return response, warnings
 
         return filtered_response, warnings
@@ -333,24 +324,16 @@ class TerraformGuardrails:
             missing_details = []
 
             # Check for AWS region
-            if not re.search(
-                r"region|us-east|us-west|eu-west|ap-southeast", message_lower
-            ):
+            if not re.search(r"region|us-east|us-west|eu-west|ap-southeast", message_lower):
                 missing_details.append("Which AWS region would you like to use?")
 
             # Check for environment
-            if not re.search(
-                r"dev|development|staging|prod|production|test", message_lower
-            ):
-                missing_details.append(
-                    "Is this for development, staging, or production?"
-                )
+            if not re.search(r"dev|development|staging|prod|production|test", message_lower):
+                missing_details.append("Is this for development, staging, or production?")
 
             # Check for instance size (if EC2 mentioned)
             if "ec2" in message_lower or "instance" in message_lower:
-                if not re.search(
-                    r"t2|t3|m5|c5|r5|micro|small|medium|large", message_lower
-                ):
+                if not re.search(r"t2|t3|m5|c5|r5|micro|small|medium|large", message_lower):
                     missing_details.append(
                         "What instance size do you need? (e.g., t3.micro, t3.small)"
                     )
@@ -417,21 +400,12 @@ class TerraformGuardrails:
                 if re.search(pattern, response):
                     uncertainty_count += 1
             except re.error as e:
-                logger.error(
-                    f"Regex error in uncertainty pattern '{pattern}': {str(e)}"
-                )
+                logger.error(f"Regex error in uncertainty pattern '{pattern}': {str(e)}")
                 continue
 
         score -= uncertainty_count * 0.1
 
         return max(0.0, min(1.0, score))
-
-    # === APPEND: AST security check (non-destructive) ===
-
-
-from io import StringIO as _GR_StringIO
-
-import hcl2 as _gr_hcl2
 
 
 def security_ast_checks_v2(tf_code: str):

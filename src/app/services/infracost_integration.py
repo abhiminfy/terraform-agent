@@ -1,11 +1,16 @@
 import json
 import logging
-import os
 import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from cachetools import TTLCache as _TTLCache
+
+from src.app.core.config import Settings as _IC_Settings
+from src.app.utils.utils import run_cmd_async as _ic_run_cmd_async
+from src.app.utils.utils import secure_tempdir as _ic_secure_tempdir
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +26,10 @@ class InfracostIntegration:
         """Check if Infracost CLI is available and configured"""
         try:
             result = subprocess.run(
-                ["infracost", "--version"], capture_output=True, text=True, timeout=10
+                ["infracost", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
 
             if result.returncode == 0:
@@ -145,7 +153,8 @@ provider "aws" {
                 if init_result.returncode != 0:
                     return {
                         "success": False,
-                        "error": f"Terraform init failed: {init_result.stderr}",
+                        "error": f"Terraform init failed: {
+                            init_result.stderr}",
                         "fallback_available": True,
                     }
 
@@ -161,13 +170,21 @@ provider "aws" {
                 if plan_result.returncode != 0:
                     return {
                         "success": False,
-                        "error": f"Terraform plan failed: {plan_result.stderr}",
+                        "error": f"Terraform plan failed: {
+                            plan_result.stderr}",
                         "fallback_available": True,
                     }
 
                 # Generate Infracost breakdown
                 breakdown_result = subprocess.run(
-                    ["infracost", "breakdown", "--path", temp_dir, "--format", "json"],
+                    [
+                        "infracost",
+                        "breakdown",
+                        "--path",
+                        temp_dir,
+                        "--format",
+                        "json",
+                    ],
                     capture_output=True,
                     text=True,
                     timeout=90,
@@ -176,7 +193,8 @@ provider "aws" {
                 if breakdown_result.returncode != 0:
                     return {
                         "success": False,
-                        "error": f"Infracost breakdown failed: {breakdown_result.stderr}",
+                        "error": f"Infracost breakdown failed: {
+                            breakdown_result.stderr}",
                         "fallback_available": True,
                     }
 
@@ -213,7 +231,10 @@ provider "aws" {
         projects = infracost_data.get("projects", [])
 
         if not projects:
-            return {"success": False, "error": "No cost data found in Infracost output"}
+            return {
+                "success": False,
+                "error": "No cost data found in Infracost output",
+            }
 
         # Extract cost information
         total_monthly_cost = 0.0
@@ -265,9 +286,7 @@ provider "aws" {
                 "yearly_cost": round(yearly_cost, 2),
                 "currency": "USD",
             },
-            "resource_breakdown": resource_breakdown[
-                :10
-            ],  # Top 10 most expensive resources
+            "resource_breakdown": resource_breakdown[:10],  # Top 10 most expensive resources
             "budget_analysis": budget_analysis,
             "total_resources": len(resource_breakdown),
             "workspace": workspace,
@@ -275,9 +294,7 @@ provider "aws" {
             "infracost_version": self._get_infracost_version(),
         }
 
-    def _extract_cost_components(
-        self, resource: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+    def _extract_cost_components(self, resource: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Extract cost components for a resource"""
         components = []
         cost_components = resource.get("costComponents", [])
@@ -296,9 +313,7 @@ provider "aws" {
 
         return components
 
-    def _check_budget_compliance(
-        self, estimated_cost: float, workspace: str
-    ) -> Dict[str, Any]:
+    def _check_budget_compliance(self, estimated_cost: float, workspace: str) -> Dict[str, Any]:
         """Check budget compliance and generate alerts"""
         workspace_budget = self.budgets.get("workspaces", {}).get(workspace)
 
@@ -315,9 +330,7 @@ provider "aws" {
         monthly_limit = workspace_budget.get("monthly_limit", 100.0)
         alert_thresholds = workspace_budget.get("alert_thresholds", [50.0, 80.0, 100.0])
 
-        budget_utilization = (
-            (estimated_cost / monthly_limit) * 100 if monthly_limit > 0 else 0
-        )
+        budget_utilization = (estimated_cost / monthly_limit) * 100 if monthly_limit > 0 else 0
 
         # Determine alert level
         alert_level = "GREEN"
@@ -358,21 +371,16 @@ provider "aws" {
         if over_budget:
             excess = cost - limit
             recommendations.append(
-                f"[COST] BUDGET EXCEEDED: Estimated cost is ${excess:.2f} over budget"
+                f"[COST] BUDGET EXCEEDED: Estimated cost is ${
+                    excess:.2f} over budget"
             )
-            recommendations.append(
-                "[CHECK] Review resource sizing and consider optimization"
-            )
-            recommendations.append(
-                " Consider implementing auto-scaling and scheduled shutdowns"
-            )
+            recommendations.append("[CHECK] Review resource sizing and consider optimization")
+            recommendations.append(" Consider implementing auto-scaling and scheduled shutdowns")
 
         utilization = (cost / limit) * 100 if limit > 0 else 0
 
         if utilization > 80:
-            recommendations.append(
-                "[WARN]  HIGH BUDGET UTILIZATION: Consider cost optimization"
-            )
+            recommendations.append("[WARN]  HIGH BUDGET UTILIZATION: Consider cost optimization")
             recommendations.append(
                 "[METRICS] Review most expensive resources for right-sizing opportunities"
             )
@@ -388,7 +396,10 @@ provider "aws" {
         """Get Infracost version"""
         try:
             result = subprocess.run(
-                ["infracost", "--version"], capture_output=True, text=True, timeout=5
+                ["infracost", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             if result.returncode == 0:
                 return result.stdout.strip()
@@ -397,7 +408,10 @@ provider "aws" {
         return None
 
     def generate_cost_diff(
-        self, old_terraform: str, new_terraform: str, workspace: str = "default"
+        self,
+        old_terraform: str,
+        new_terraform: str,
+        workspace: str = "default",
     ) -> Dict[str, Any]:
         """Generate cost difference between two Terraform configurations"""
         if not self.infracost_available:
@@ -418,12 +432,8 @@ provider "aws" {
                 new_dir.mkdir()
 
                 # Write configurations
-                (old_dir / "main.tf").write_text(
-                    old_terraform, encoding="utf-8", errors="ignore"
-                )
-                (new_dir / "main.tf").write_text(
-                    new_terraform, encoding="utf-8", errors="ignore"
-                )
+                (old_dir / "main.tf").write_text(old_terraform, encoding="utf-8", errors="ignore")
+                (new_dir / "main.tf").write_text(new_terraform, encoding="utf-8", errors="ignore")
 
                 # Generate diff
                 diff_result = subprocess.run(
@@ -445,18 +455,20 @@ provider "aws" {
                 if diff_result.returncode != 0:
                     return {
                         "success": False,
-                        "error": f"Infracost diff failed: {diff_result.stderr}",
+                        "error": f"Infracost diff failed: {
+                            diff_result.stderr}",
                     }
 
                 diff_data = json.loads(diff_result.stdout)
                 return self._process_cost_diff(diff_data, workspace)
 
         except Exception as e:
-            return {"success": False, "error": f"Cost diff generation failed: {e}"}
+            return {
+                "success": False,
+                "error": f"Cost diff generation failed: {e}",
+            }
 
-    def _process_cost_diff(
-        self, diff_data: Dict[str, Any], workspace: str
-    ) -> Dict[str, Any]:
+    def _process_cost_diff(self, diff_data: Dict[str, Any], workspace: str) -> Dict[str, Any]:
         """Process cost diff data"""
         projects = diff_data.get("projects", [])
 
@@ -483,7 +495,7 @@ provider "aws" {
                             "change_type": (
                                 "added"
                                 if monthly_diff > 0
-                                else "removed" if monthly_diff < 0 else "modified"
+                                else ("removed" if monthly_diff < 0 else "modified")
                             ),
                         }
                     )
@@ -505,9 +517,7 @@ provider "aws" {
             "generated_at": datetime.now().isoformat(),
         }
 
-    def _calculate_percentage_change(
-        self, diff_data: Dict[str, Any]
-    ) -> Optional[float]:
+    def _calculate_percentage_change(self, diff_data: Dict[str, Any]) -> Optional[float]:
         """Calculate percentage change in cost"""
         try:
             projects = diff_data.get("projects", [])
@@ -518,7 +528,8 @@ provider "aws" {
 
                 if total_previous > 0:
                     return round(
-                        ((total_current - total_previous) / total_previous) * 100, 1
+                        ((total_current - total_previous) / total_previous) * 100,
+                        1,
                     )
         except (KeyError, ValueError, ZeroDivisionError):
             pass
@@ -537,12 +548,8 @@ provider "aws" {
         summary = f"Monthly cost {change_type} of ${abs_diff:.2f}"
 
         if resource_diffs:
-            added_count = len(
-                [r for r in resource_diffs if r["change_type"] == "added"]
-            )
-            removed_count = len(
-                [r for r in resource_diffs if r["change_type"] == "removed"]
-            )
+            added_count = len([r for r in resource_diffs if r["change_type"] == "added"])
+            removed_count = len([r for r in resource_diffs if r["change_type"] == "removed"])
 
             if added_count > 0:
                 summary += f" ({added_count} resources added"
@@ -558,7 +565,10 @@ provider "aws" {
         return summary
 
     def update_budget(
-        self, workspace: str, monthly_limit: float, alert_thresholds: List[float]
+        self,
+        workspace: str,
+        monthly_limit: float,
+        alert_thresholds: List[float],
     ) -> Dict[str, Any]:
         """Update budget configuration for a workspace"""
         try:
@@ -610,13 +620,6 @@ provider "aws" {
     # === APPEND: async + cache + multi-currency (non-destructive) ===
 
 
-import time as _time
-
-from backend.app.core.config import Settings as _IC_Settings
-from backend.app.utils.utils import run_cmd_async as _ic_run_cmd_async
-from backend.app.utils.utils import secure_tempdir as _ic_secure_tempdir
-from cachetools import TTLCache as _TTLCache
-
 _ic_settings = _IC_Settings()
 _ic_cache = _TTLCache(maxsize=256, ttl=3600)
 _IC_RATES = {
@@ -636,7 +639,11 @@ async def estimate_cost_async_v2(tf_code: str, currency: str = "USD"):
     key = f"v2:{hash(tf_code)}:{currency.upper()}"
     cached = _ic_cache.get(key)
     if cached:
-        return {"success": True, "data": {**cached, "cached": True}, "error": ""}
+        return {
+            "success": True,
+            "data": {**cached, "cached": True},
+            "error": "",
+        }
 
     try:
         with _ic_secure_tempdir("ic_v2_") as d:

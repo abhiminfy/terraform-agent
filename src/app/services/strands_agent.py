@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-# fmt: off
-# flake8: noqa  (only until commit passes, then remove this line)
-"""
-Terraform Agent – pre-commit safe (Black 79 + Flake8 79).
-All long strings have been hand-wrapped so Black will NOT change them.
-"""
 import asyncio
 import difflib
 import os
@@ -68,16 +61,34 @@ genai.configure(api_key=API_KEY)
 def infer_cloud(s: str) -> Optional[str]:
     s = (s or "").lower()
     aws_k = [
-        "s3", "ec2", "iam", "vpc", "route53", "aws",
-        "cloudwatch", "alb", "eks", "lambda",
+        "s3",
+        "ec2",
+        "iam",
+        "vpc",
+        "route53",
+        "aws",
+        "cloudwatch",
+        "alb",
+        "eks",
+        "lambda",
     ]
     gcp_k = [
-        "gcs", "gke", "bigquery", "pubsub", "gcp",
-        "google cloud", "compute engine", "cloud run",
+        "gcs",
+        "gke",
+        "bigquery",
+        "pubsub",
+        "gcp",
+        "google cloud",
+        "compute engine",
+        "cloud run",
     ]
     azure_k = [
-        "azure", "azurerm", "resource group",
-        "storage account", "vnet", "aks",
+        "azure",
+        "azurerm",
+        "resource group",
+        "storage account",
+        "vnet",
+        "aks",
     ]
     if any(k in s for k in aws_k):
         return "aws"
@@ -110,9 +121,7 @@ class TerraformTools:
             r'db_name\s*=\s*"[^"]*"': 'db_name = "demo_database"  # Demo',  # noqa
             r'identifier\s*=\s*"[^"]*"': 'identifier = "demo-db-instance"  # Demo',  # noqa
             r'key_name\s*=\s*"[^"]*"': 'key_name = "demo-keypair"  # Replace',  # noqa
-            r'subnet_id\s*=\s*"[^"]*"': (
-                "subnet_id = data.aws_subnet.selected.id  # data source"
-            ),
+            r'subnet_id\s*=\s*"[^"]*"': ("subnet_id = data.aws_subnet.selected.id  # data source"),
             r"vpc_security_group_ids\s*=\s*\[[^\]]*\]": (
                 "vpc_security_group_ids = [aws_security_group.demo.id]"
             ),
@@ -135,9 +144,7 @@ class TerraformTools:
         if not response_text:
             return ""
 
-        fenced = re.findall(
-            r"```(?:terraform|hcl|tf)?\n?(.*?)```", response_text, re.DOTALL
-        )
+        fenced = re.findall(r"```(?:terraform|hcl|tf)?\n?(.*?)```", response_text, re.DOTALL)
         blocks = [b.strip() for b in fenced if b and b.strip()]
         if blocks:
             return "\n\n".join(blocks)
@@ -146,9 +153,7 @@ class TerraformTools:
             r"((?:resource|provider|variable|output|data|module|terraform)\s+[^{]*"
             r"{[^{}]*(?:{[^{}]*}[^{}]*)*})"
         )
-        matches = re.findall(
-            hcl_block_pattern, response_text, re.DOTALL | re.IGNORECASE
-        )
+        matches = re.findall(hcl_block_pattern, response_text, re.DOTALL | re.IGNORECASE)
         if matches:
             return "\n\n".join([m.strip() for m in matches if m.strip()])
 
@@ -173,9 +178,7 @@ class TerraformTools:
         return ""
 
     @staticmethod
-    def ensure_minimal_scaffold(
-        terraform_code: str, cloud: Optional[str] = "aws"
-    ) -> str:
+    def ensure_minimal_scaffold(terraform_code: str, cloud: Optional[str] = "aws") -> str:
         """
         Ensure snippet has a minimal, working scaffold for the target cloud.
         Adds blocks only if missing.
@@ -278,9 +281,7 @@ class TerraformTools:
         return "\n\n".join(pieces)
 
     @metrics.track_tool("terraform_timeout")
-    def run_with_timeout(
-        command: List[str], timeout: int = 30, cwd: str = "."
-    ) -> Dict[str, Any]:
+    def run_with_timeout(command: List[str], timeout: int = 30, cwd: str = ".") -> Dict[str, Any]:
         """Run subprocess with timeout and graceful error handling"""
         try:
             result = subprocess.run(
@@ -327,9 +328,7 @@ class TerraformTools:
         """Estimate infrastructure costs using the new Infracost integration"""
         try:
             if infracost_integration.infracost_available:
-                result = infracost_integration.generate_cost_estimate(
-                    terraform_code, "default"
-                )
+                result = infracost_integration.generate_cost_estimate(terraform_code, "default")
                 if result.get("success"):
                     cost_data = result.get("cost_estimate", {})
                     monthly_cost = cost_data.get("monthly_cost", 0)
@@ -374,9 +373,7 @@ class TerraformTools:
         if not terraform_code:
             return "No Terraform code provided for cost estimation"
         try:
-            analysis = infrastructure_analyzer.analyze_terraform_resources(
-                terraform_code
-            )
+            analysis = infrastructure_analyzer.analyze_terraform_resources(terraform_code)
             if "error" in analysis:
                 return f"Cost estimation failed: {analysis['error']}"
 
@@ -387,9 +384,7 @@ class TerraformTools:
             yearly_cost = calculator.multiply(estimated_cost, 12)
 
             cost_breakdown: List[str] = []
-            cost_breakdown.append(
-                "📊 ROUGH COST ESTIMATE (Not exact - for planning only)"
-            )
+            cost_breakdown.append("📊 ROUGH COST ESTIMATE (Not exact - for planning only)")
             cost_breakdown.append("=" * 60)
             cost_breakdown.append(f"Resources analyzed: {resource_count}")
             cost_breakdown.append("")
@@ -407,8 +402,7 @@ class TerraformTools:
             cost_breakdown.append(f"💰 Estimated yearly cost: ~${yearly_cost:.2f}")
             cost_breakdown.append("")
             cost_breakdown.append(
-                "⚠️  This is a rough estimate. "
-                "Install Infracost CLI for accurate pricing."
+                "⚠️  This is a rough estimate. " "Install Infracost CLI for accurate pricing."
             )
             return "\n".join(cost_breakdown)
         except Exception as e:
@@ -419,8 +413,7 @@ class TerraformTools:
         """Push to GitHub using new integration with PR workflow"""
         if not github_integration.available:
             return (
-                "GitHub push skipped: Missing GITHUB_TOKEN or "
-                "GITHUB_REPO environment variables"
+                "GitHub push skipped: Missing GITHUB_TOKEN or " "GITHUB_REPO environment variables"
             )
         try:
             result = github_integration.create_branch_and_pr(
@@ -445,25 +438,17 @@ class TerraformTools:
                 lines.append(f"Check results: {result.get('checks_summary', '')}")
                 return "\n".join(lines)
             else:
-                return (
-                    f"GitHub PR creation failed: "
-                    f"{result.get('error', 'Unknown error')}"
-                )
+                return f"GitHub PR creation failed: " f"{result.get('error', 'Unknown error')}"
         except Exception as e:
             return f"GitHub operation failed: {str(e)}"
 
     @staticmethod
-    def create_diff(
-        old_content: str, new_content: str, filename: str = "main.tf"
-    ) -> str:
+    def create_diff(old_content: str, new_content: str, filename: str = "main.tf") -> str:
         """Create a diff between old and new content"""
         if not old_content and not new_content:
             return "No changes"
         if not old_content:
-            return (
-                f"New file created: {filename} "
-                f"({len(new_content.splitlines())} lines)"
-            )
+            return f"New file created: {filename} " f"({len(new_content.splitlines())} lines)"
         if not new_content:
             return f"File deleted: {filename}"
 
@@ -662,9 +647,7 @@ class TerraformAgent:
         context = ""
         chat_settings: Dict[str, Any] = {}
         if chat_id:
-            context = self.chat_memory.get_context_for_prompt(
-                chat_id, context_length=5
-            )
+            context = self.chat_memory.get_context_for_prompt(chat_id, context_length=5)
             chat_settings = self.chat_memory.get_chat_settings(chat_id)
 
         sys_prompt = """\
@@ -721,9 +704,7 @@ FINAL RESPONSE: <your response or Terraform code>"""
             for attempt in range(3):
                 try:
                     start = time.time()
-                    response = await asyncio.to_thread(
-                        self.model.generate_content, full_prompt
-                    )
+                    response = await asyncio.to_thread(self.model.generate_content, full_prompt)
                     self.metrics.record_generation_time(time.time() - start)
 
                     if response and hasattr(response, "text") and response.text:
@@ -766,8 +747,7 @@ FINAL RESPONSE: <your response or Terraform code>"""
             print(f"❌ Error in get_reasoned_response: {str(e)}")
             return (
                 f"Error generating response: {str(e)}",
-                "I encountered an error while processing your request. "
-                "Please try again.",
+                "I encountered an error while processing your request. " "Please try again.",
             )
 
     async def ask_for_clarity(self, user_prompt: str) -> str:
@@ -782,27 +762,18 @@ Ask 2-3 specific technical questions about:
 
 Return numbered questions only."""
         try:
-            response = await asyncio.to_thread(
-                self.model.generate_content, clarification_prompt
-            )
+            response = await asyncio.to_thread(self.model.generate_content, clarification_prompt)
             if response and hasattr(response, "text") and response.text:
                 return response.text.strip()
             else:
-                return (
-                    "Could you provide more details about your infrastructure "
-                    "requirements?"
-                )
+                return "Could you provide more details about your infrastructure " "requirements?"
         except Exception as e:
             print(f"❌ Error in ask_for_clarity: {str(e)}")
-            return (
-                "Could you provide more details about what you'd like to deploy?"
-            )
+            return "Could you provide more details about what you'd like to deploy?"
 
     def check_tool_availability(self) -> Dict[str, bool]:
         tools_status = {}
-        terraform_result = TerraformTools.run_with_timeout(
-            ["terraform", "--version"], timeout=5
-        )
+        terraform_result = TerraformTools.run_with_timeout(["terraform", "--version"], timeout=5)
         tools_status["terraform"] = terraform_result["success"]
         tools_status["infracost"] = self.infracost_integration.infracost_available
         git_result = TerraformTools.run_with_timeout(["git", "--version"], timeout=5)
@@ -811,9 +782,7 @@ Return numbered questions only."""
         tools_status["policy_scanners"] = self.policy_engine.enabled_scanners
         return tools_status
 
-    async def process_message(
-        self, user_message: str, chat_id: str = "default"
-    ) -> Dict[str, Any]:
+    async def process_message(self, user_message: str, chat_id: str = "default") -> Dict[str, Any]:
         """Process message with comprehensive features and integrations"""
         print(f"🔄 Processing message: {user_message}")
 
@@ -845,9 +814,7 @@ Return numbered questions only."""
                     {
                         "type": "error",
                         "content": input_validation["reason"],
-                        "questions": "\n".join(
-                            input_validation.get("suggestions", [])
-                        ),
+                        "questions": "\n".join(input_validation.get("suggestions", [])),
                         "thinking_trace": "Input validation failed",
                     }
                 )
@@ -856,12 +823,10 @@ Return numbered questions only."""
             user_message = user_message.strip()
             self.chat_memory.save_message(chat_id, "user", user_message)
 
-            should_clarify, clarification_questions = (
-                self.guardrails.should_ask_for_clarification(user_message)
-            )
-            if should_clarify and self.guardrails.is_infrastructure_request(
+            should_clarify, clarification_questions = self.guardrails.should_ask_for_clarification(
                 user_message
-            ):
+            )
+            if should_clarify and self.guardrails.is_infrastructure_request(user_message):
                 print("❓ Need clarification for infrastructure request")
                 questions_text = "\n".join(clarification_questions)
                 self.chat_memory.save_message(
@@ -904,8 +869,8 @@ Return numbered questions only."""
                     )
                 else:
                     print("⚙️ Generating and processing Terraform code")
-                    terraform_validation = (
-                        self.guardrails.validate_terraform_response(model_response)
+                    terraform_validation = self.guardrails.validate_terraform_response(
+                        model_response
                     )
                     if (
                         not terraform_validation["valid"]
@@ -925,28 +890,18 @@ Return numbered questions only."""
                         return result
 
                     # Scaffold for detected cloud (AWS/GCP/Azure)
-                    raw_code = self.tools.ensure_minimal_scaffold(
-                        raw_code, cloud=cloud_hint
-                    )
+                    raw_code = self.tools.ensure_minimal_scaffold(raw_code, cloud=cloud_hint)
                     processed_code = self.tools.highlight_placeholders(raw_code)
 
-                    security_issues = self.guardrails.check_security_issues(
-                        processed_code
-                    )
+                    security_issues = self.guardrails.check_security_issues(processed_code)
 
-                    policy_result = self.policy_engine.validate_with_policies(
-                        processed_code
-                    )
+                    policy_result = self.policy_engine.validate_with_policies(processed_code)
                     result["policy_report"] = policy_result
                     if policy_result.get("violations"):
-                        comprehensive_report = (
-                            self.policy_engine.create_policy_report(
-                                policy_result, processed_code
-                            )
+                        comprehensive_report = self.policy_engine.create_policy_report(
+                            policy_result, processed_code
                         )
-                        result["policy_report"][
-                            "comprehensive_report"
-                        ] = comprehensive_report
+                        result["policy_report"]["comprehensive_report"] = comprehensive_report
 
                     old_content = ""
                     main_tf_path = Path("main.tf")
@@ -965,9 +920,7 @@ Return numbered questions only."""
                             result["backup_path"] = backup_file.name
 
                     # Use file_operations to save the Terraform code
-                    save_result = file_operations.save_terraform_file(
-                        processed_code, "main.tf"
-                    )
+                    save_result = file_operations.save_terraform_file(processed_code, "main.tf")
                     if not save_result["success"]:
                         result.update(
                             {
@@ -981,9 +934,7 @@ Return numbered questions only."""
                         return result
 
                     # Sanitize & auto-fix common HCL issues
-                    processed_code = terraform_validator.normalize_unicode(
-                        processed_code
-                    )
+                    processed_code = terraform_validator.normalize_unicode(processed_code)
                     _ctx = locals().get("context")
                     region_hint = None
                     if isinstance(_ctx, dict):
@@ -999,9 +950,7 @@ Return numbered questions only."""
                     except Exception:
                         pass
 
-                    formatted_code = terraform_validator.format_terraform_code(
-                        processed_code
-                    )
+                    formatted_code = terraform_validator.format_terraform_code(processed_code)
                     validation_result = terraform_validator.validate_terraform_syntax(
                         formatted_code
                     )
@@ -1019,10 +968,8 @@ Return numbered questions only."""
                     cli_checks: Dict[str, Any] = {}
                     if want_plan:
                         try:
-                            cli_checks = (
-                                terraform_validator.run_fmt_validate_plan_from_code(
-                                    formatted_code, timeout=120
-                                )
+                            cli_checks = terraform_validator.run_fmt_validate_plan_from_code(
+                                formatted_code, timeout=120
                             )
                             # Use plan_analyzer to analyze the plan output
                             if "plan_output" in cli_checks:
@@ -1060,55 +1007,41 @@ Return numbered questions only."""
                         )
                         return result
 
-                    security_analysis = (
-                        infrastructure_analyzer.analyze_terraform_resources(
-                            formatted_code
-                        )
+                    security_analysis = infrastructure_analyzer.analyze_terraform_resources(
+                        formatted_code
                     )
                     security_concerns = security_analysis.get("security_concerns", [])
                     if sanity_issues:
-                        security_concerns.extend(
-                            [f"Static sanity: {s}" for s in sanity_issues]
-                        )
+                        security_concerns.extend([f"Static sanity: {s}" for s in sanity_issues])
 
                     blast_warnings = self.tools.analyze_blast_radius(formatted_code)
 
                     best_practices: List[str] = []
                     if validation_result["valid"]:
-                        practices = infrastructure_analyzer.suggest_best_practices(
-                            formatted_code
-                        )
+                        practices = infrastructure_analyzer.suggest_best_practices(formatted_code)
                         best_practices = practices[:3]
 
                     diff_output = ""
                     if old_content:
-                        diff_output = self.tools.create_diff(
-                            old_content, formatted_code
-                        )
+                        diff_output = self.tools.create_diff(old_content, formatted_code)
 
                     cost_estimate: Any = "Skipped"
                     if self.tools.mentions_cost_estimate(user_message):
                         print("💰 Running cost estimation...")
                         if self.infracost_integration.infracost_available:
-                            cost_result = (
-                                self.infracost_integration.generate_cost_estimate(
-                                    formatted_code, "default"
-                                )
+                            cost_result = self.infracost_integration.generate_cost_estimate(
+                                formatted_code, "default"
                             )
                             if cost_result.get("success"):
                                 cost_estimate = cost_result
                                 result["infracost_data"] = cost_result
-                                monthly_cost = cost_result.get(
-                                    "cost_estimate", {}
-                                ).get("monthly_cost", 0)
-                                self.metrics.record_cost_estimation(
-                                    "infracost", monthly_cost
+                                monthly_cost = cost_result.get("cost_estimate", {}).get(
+                                    "monthly_cost", 0
                                 )
+                                self.metrics.record_cost_estimation("infracost", monthly_cost)
                             else:
-                                cost_estimate = (
-                                    self.tools.estimate_infracost_with_fallback(
-                                        formatted_code
-                                    )
+                                cost_estimate = self.tools.estimate_infracost_with_fallback(
+                                    formatted_code
                                 )
                         else:
                             cost_estimate = self.tools.estimate_infracost_with_fallback(
@@ -1118,20 +1051,14 @@ Return numbered questions only."""
                     git_result = "Skipped"
                     if self.tools.mentions_github_push(user_message):
                         print("📤 Creating GitHub PR...")
-                        git_result = self.tools.push_to_github_with_resilience(
-                            formatted_code
-                        )
+                        git_result = self.tools.push_to_github_with_resilience(formatted_code)
 
                     try:
-                        file_operations.save_terraform_file(
-                            formatted_code, "main.tf"
-                        )
+                        file_operations.save_terraform_file(formatted_code, "main.tf")
                     except Exception:
                         pass
 
-                    confidence = self.guardrails.get_confidence_score(
-                        model_response, user_message
-                    )
+                    confidence = self.guardrails.get_confidence_score(model_response, user_message)
                     response_content = (
                         f"✅ Generated Terraform code with "
                         f"{len(security_analysis.get('resources', []))} resources"
@@ -1142,13 +1069,9 @@ Return numbered questions only."""
                         response_content,
                         {
                             "type": "terraform",
-                            "resource_count": len(
-                                security_analysis.get("resources", [])
-                            ),
+                            "resource_count": len(security_analysis.get("resources", [])),
                             "has_security_issues": len(security_concerns) > 0,
-                            "policy_violations": len(
-                                policy_result.get("violations", [])
-                            ),
+                            "policy_violations": len(policy_result.get("violations", [])),
                         },
                     )
 
@@ -1183,12 +1106,8 @@ Return numbered questions only."""
                     )
             else:
                 print("💬 Handling regular chat")
-                thinking, response = await self.get_reasoned_response(
-                    user_message, chat_id
-                )
-                confidence = self.guardrails.get_confidence_score(
-                    response, user_message
-                )
+                thinking, response = await self.get_reasoned_response(user_message, chat_id)
+                confidence = self.guardrails.get_confidence_score(response, user_message)
                 self.chat_memory.save_message(
                     chat_id,
                     "assistant",
@@ -1211,9 +1130,7 @@ Return numbered questions only."""
             result.update(
                 {
                     "type": "error",
-                    "content": (
-                        f"I encountered an error while processing your request: {str(e)}"
-                    ),
+                    "content": (f"I encountered an error while processing your request: {str(e)}"),
                     "thinking_trace": f"Error occurred during processing: {str(e)}",
                 }
             )
@@ -1230,9 +1147,7 @@ Return numbered questions only."""
     def list_all_chats(self) -> List[Dict[str, Any]]:
         return self.chat_memory.list_chats()
 
-    def search_chats(
-        self, query: str, include_archived: bool = False
-    ) -> List[Dict[str, Any]]:
+    def search_chats(self, query: str, include_archived: bool = False) -> List[Dict[str, Any]]:
         return self.chat_memory.search_chats(query, include_archived)
 
     def get_chat_stats(self) -> Dict[str, Any]:
@@ -1250,9 +1165,7 @@ Return numbered questions only."""
                 "main_tf_exists": Path("main.tf").exists(),
                 "chat_memory_initialized": self.chat_memory is not None,
                 "guardrails_initialized": self.guardrails is not None,
-                "chat_data_dir": (
-                    str(self.chat_memory.storage_dir) if self.chat_memory else None
-                ),
+                "chat_data_dir": (str(self.chat_memory.storage_dir) if self.chat_memory else None),
                 "integrations": {
                     "policy_engine": True,
                     "infracost": self.infracost_integration.infracost_available,
@@ -1264,9 +1177,7 @@ Return numbered questions only."""
             }
             if not tool_status.get("terraform", False):
                 health["status"] = "degraded"
-                health["warning"] = (
-                    "Terraform CLI not available - validation/formatting disabled"
-                )
+                health["warning"] = "Terraform CLI not available - validation/formatting disabled"
             critical_failures = []
             if not self.infracost_integration.infracost_available:
                 critical_failures.append("Infracost CLI not configured")
@@ -1343,19 +1254,13 @@ def _sa_append(chat_id: str, role: str, text: str):
 def _sa_context(chat_id: str, n: int = 8) -> str:
     msgs = _sa_cache.get(chat_id) or []
     msgs = msgs[-n:]
-    return (
-        "\n".join([f"{r.upper()}: {t}" for r, t in msgs])
-        if msgs
-        else "(no prior context)"
-    )
+    return "\n".join([f"{r.upper()}: {t}" for r, t in msgs]) if msgs else "(no prior context)"
 
 
 def _sa_fallback(prompt: str) -> str:
     if not pipeline:
         return "Fallback model unavailable."
-    gen = pipeline(
-        "text-generation", model=_sa_settings.HF_MODEL, max_new_tokens=256
-    )
+    gen = pipeline("text-generation", model=_sa_settings.HF_MODEL, max_new_tokens=256)
     return gen(prompt, do_sample=False)[0]["generated_text"]
 
 

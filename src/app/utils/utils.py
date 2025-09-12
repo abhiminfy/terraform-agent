@@ -64,9 +64,7 @@ async def run_cmd_async(
     wait=wait_exponential(multiplier=1, min=1, max=10),
     retry=retry_if_exception_type((httpx.ConnectError, httpx.ReadTimeout)),
 )
-async def http_json_get(
-    url: str, headers: Optional[Dict[str, str]] = None
-) -> Dict[str, Any]:
+async def http_json_get(url: str, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     async with httpx.AsyncClient(timeout=20.0) as client:
         resp = await client.get(url, headers=headers)
         resp.raise_for_status()

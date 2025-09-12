@@ -11,6 +11,8 @@ from typing import Any, Dict
 
 import google.generativeai as genai  # type: ignore
 
+from src.app.core.metrics import metrics as _ver_metrics
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -76,9 +78,7 @@ def _model():
     return genai.GenerativeModel(model_name=MODEL_NAME, system_instruction=SYSTEM)
 
 
-def verify_answer(
-    user_message: str, draft_text: str, min_citations: int = 1
-) -> Dict[str, Any]:
+def verify_answer(user_message: str, draft_text: str, min_citations: int = 1) -> Dict[str, Any]:
     """
     Returns dict: {"answer": <refined_markdown>, "sources": [..], "verified": bool, "reasoning_note": str}
     If model unavailable or key missing, returns a safe default with verified=False.
@@ -135,7 +135,6 @@ def verify_answer(
 
 
 # === APPEND: structured verify w/ token accounting (non-destructive) ===
-from backend.app.core.metrics import metrics as _ver_metrics
 
 
 def verify_with_gemini_v2(prompt: str, citations: bool = True):
@@ -150,12 +149,14 @@ def verify_with_gemini_v2(prompt: str, citations: bool = True):
     # Replace with real Gemini call:
     answer = "Verified with citations..." if citations else "Verified."
     completion_tokens = len(answer.split())
-    _ver_metrics.model_tokens.labels(model_name=model, type="completion").inc(
-        completion_tokens
-    )
+    _ver_metrics.model_tokens.labels(model_name=model, type="completion").inc(completion_tokens)
     try:
         _ver_metrics.token_budget_remaining.dec(float(completion_tokens))
     except Exception:
         pass
     _ver_metrics.model_requests.labels(model_name=model, status="success").inc()
-    return {"success": True, "data": {"answer": answer, "model": model}, "error": ""}
+    return {
+        "success": True,
+        "data": {"answer": answer, "model": model},
+        "error": "",
+    }

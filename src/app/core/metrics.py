@@ -5,7 +5,6 @@ import time
 from functools import wraps
 from typing import Any, Dict
 
-from backend.app.core.config import Settings
 from prometheus_client import (
     CollectorRegistry,
     Counter,
@@ -14,6 +13,8 @@ from prometheus_client import (
     generate_latest,
 )
 from prometheus_client.exposition import push_to_gateway
+
+from src.app.core.config import Settings
 
 logger = logging.getLogger(__name__)
 settings = Settings()
@@ -145,9 +146,7 @@ class MetricsCollector:
     def _try_push(self, job: str):
         if settings.PROM_PUSHGATEWAY:
             try:
-                push_to_gateway(
-                    settings.PROM_PUSHGATEWAY, job=job, registry=self.registry
-                )
+                push_to_gateway(settings.PROM_PUSHGATEWAY, job=job, registry=self.registry)
             except Exception as e:
                 logger.debug(f"Pushgateway push failed (ignored): {e}")
 
@@ -178,18 +177,12 @@ class MetricsCollector:
                     return result
                 except Exception as e:
                     status = "error"
-                    self.errors.labels(
-                        error_type=type(e).__name__, endpoint=endpoint
-                    ).inc()
+                    self.errors.labels(error_type=type(e).__name__, endpoint=endpoint).inc()
                     raise
                 finally:
                     duration = time.time() - start_time
-                    self.request_count.labels(
-                        method=method, endpoint=endpoint, status=status
-                    ).inc()
-                    self.request_duration.labels(
-                        method=method, endpoint=endpoint
-                    ).observe(duration)
+                    self.request_count.labels(method=method, endpoint=endpoint, status=status).inc()
+                    self.request_duration.labels(method=method, endpoint=endpoint).observe(duration)
                     self._try_push("requests")
 
             return wrapper
@@ -207,18 +200,12 @@ class MetricsCollector:
                     return result
                 except Exception as e:
                     status = "error"
-                    self.errors.labels(
-                        error_type=type(e).__name__, endpoint=tool_name
-                    ).inc()
+                    self.errors.labels(error_type=type(e).__name__, endpoint=tool_name).inc()
                     raise
                 finally:
                     duration = time.time() - start_time
-                    self.tool_execution_count.labels(
-                        tool_name=tool_name, status=status
-                    ).inc()
-                    self.tool_execution_duration.labels(tool_name=tool_name).observe(
-                        duration
-                    )
+                    self.tool_execution_count.labels(tool_name=tool_name, status=status).inc()
+                    self.tool_execution_duration.labels(tool_name=tool_name).observe(duration)
                     self._try_push("tools")
 
             return wrapper
@@ -236,17 +223,17 @@ class MetricsCollector:
                 try:
                     result = func(*args, **kwargs)
                     if prompt_tokens > 0:
-                        self.model_tokens.labels(
-                            model_name=model_name, type="prompt"
-                        ).inc(prompt_tokens)
+                        self.model_tokens.labels(model_name=model_name, type="prompt").inc(
+                            prompt_tokens
+                        )
                         try:
                             self.token_budget_remaining.dec(float(prompt_tokens))
                         except Exception:
                             pass
                     if completion_tokens > 0:
-                        self.model_tokens.labels(
-                            model_name=model_name, type="completion"
-                        ).inc(completion_tokens)
+                        self.model_tokens.labels(model_name=model_name, type="completion").inc(
+                            completion_tokens
+                        )
                         try:
                             self.token_budget_remaining.dec(float(completion_tokens))
                         except Exception:
@@ -257,9 +244,7 @@ class MetricsCollector:
                     raise
                 finally:
                     duration = time.time() - start_time
-                    self.model_requests.labels(
-                        model_name=model_name, status=status
-                    ).inc()
+                    self.model_requests.labels(model_name=model_name, status=status).inc()
                     self.model_latency.labels(model_name=model_name).observe(duration)
                     self._try_push("models")
 

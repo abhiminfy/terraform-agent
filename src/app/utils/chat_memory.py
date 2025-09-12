@@ -1,8 +1,5 @@
-import hashlib
 import json
 import logging
-import os
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -24,7 +21,11 @@ class ChatMemory:
         return self.storage_dir / f"chat_{safe_chat_id}.json"
 
     def save_message(
-        self, chat_id: str, role: str, message: str, metadata: Dict[str, Any] = None
+        self,
+        chat_id: str,
+        role: str,
+        message: str,
+        metadata: Dict[str, Any] = None,
     ) -> bool:
         """Save a message to chat history with auto title generation"""
         try:
@@ -171,9 +172,7 @@ class ChatMemory:
                     break
 
             # Extract key topics from the conversation
-            title = self._extract_title_from_content(
-                first_user_message, first_assistant_response
-            )
+            title = self._extract_title_from_content(first_user_message, first_assistant_response)
             return title
 
         except Exception as e:
@@ -230,10 +229,7 @@ class ChatMemory:
                 # Identify topics
                 if "terraform" in content or "infrastructure" in content:
                     topics.append("infrastructure")
-                if any(
-                    service in content
-                    for service in ["ec2", "s3", "rds", "vpc", "lambda"]
-                ):
+                if any(service in content for service in ["ec2", "s3", "rds", "vpc", "lambda"]):
                     topics.append("aws_services")
                 if "cost" in content or "pricing" in content:
                     topics.append("cost_analysis")
@@ -258,9 +254,7 @@ class ChatMemory:
                 unique_actions = list(set(actions))
                 summary_parts.append(f"Actions: {', '.join(unique_actions)}")
 
-            return (
-                " | ".join(summary_parts) if summary_parts else "General conversation"
-            )
+            return " | ".join(summary_parts) if summary_parts else "General conversation"
 
         except Exception as e:
             logger.error(f"Failed to generate chat summary: {str(e)}")
@@ -309,9 +303,7 @@ class ChatMemory:
                     settings_context.append(f"Budget: ${settings['budget']}")
 
                 if settings_context:
-                    context_lines.append(
-                        f"Chat Settings: {', '.join(settings_context)}"
-                    )
+                    context_lines.append(f"Chat Settings: {', '.join(settings_context)}")
                     context_lines.append("")
 
             # Add conversation history
@@ -378,9 +370,7 @@ class ChatMemory:
                         chats.append(chat_info)
 
                 except (json.JSONDecodeError, KeyError) as e:
-                    logger.warning(
-                        f"Skipping corrupted chat file: {chat_file} - {str(e)}"
-                    )
+                    logger.warning(f"Skipping corrupted chat file: {chat_file} - {str(e)}")
                     continue
 
             # Sort by last updated (most recent first)
@@ -391,9 +381,7 @@ class ChatMemory:
             logger.error(f"Failed to list chats: {str(e)}")
             return []
 
-    def search_chats(
-        self, query: str, include_archived: bool = False
-    ) -> List[Dict[str, Any]]:
+    def search_chats(self, query: str, include_archived: bool = False) -> List[Dict[str, Any]]:
         """Search chats by content, title, or summary"""
         try:
             all_chats = self.list_chats()
@@ -448,9 +436,7 @@ class ChatMemory:
 
             # Find most active chat
             most_active = (
-                max(all_chats, key=lambda x: x.get("message_count", 0))
-                if all_chats
-                else None
+                max(all_chats, key=lambda x: x.get("message_count", 0)) if all_chats else None
             )
 
             # Calculate average messages per chat
@@ -498,9 +484,7 @@ class ChatMemory:
                 "archived_chats": 0,
             }
 
-    def export_chat(
-        self, chat_id: str, format: str = "json"
-    ) -> Optional[Dict[str, Any]]:
+    def export_chat(self, chat_id: str, format: str = "json") -> Optional[Dict[str, Any]]:
         """Export chat data in specified format"""
         try:
             chat_file = self._get_chat_file(chat_id)
@@ -535,9 +519,7 @@ class ChatMemory:
             md_lines.append("## Chat Information")
             md_lines.append(f"- **Chat ID**: {chat_data.get('chat_id', 'Unknown')}")
             md_lines.append(f"- **Created**: {chat_data.get('created_at', 'Unknown')}")
-            md_lines.append(
-                f"- **Last Updated**: {chat_data.get('last_updated', 'Unknown')}"
-            )
+            md_lines.append(f"- **Last Updated**: {chat_data.get('last_updated', 'Unknown')}")
             md_lines.append(f"- **Message Count**: {chat_data.get('message_count', 0)}")
 
             if chat_data.get("summary"):
@@ -576,9 +558,7 @@ class ChatMemory:
             logger.error(f"Failed to convert to markdown: {str(e)}")
             return {"error": str(e)}
 
-    def cleanup_old_chats(
-        self, days_old: int = 30, archive_instead: bool = True
-    ) -> Dict[str, Any]:
+    def cleanup_old_chats(self, days_old: int = 30, archive_instead: bool = True) -> Dict[str, Any]:
         """Clean up old chats by archiving or deleting"""
         try:
             from datetime import timedelta
@@ -593,9 +573,7 @@ class ChatMemory:
                     with open(chat_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
 
-                    last_updated = datetime.fromisoformat(
-                        data.get("last_updated", "1970-01-01")
-                    )
+                    last_updated = datetime.fromisoformat(data.get("last_updated", "1970-01-01"))
 
                     if last_updated < cutoff_date:
                         if archive_instead and not data.get("archived", False):
@@ -615,9 +593,7 @@ class ChatMemory:
                         processed_count += 1
 
                 except Exception as e:
-                    logger.warning(
-                        f"Error processing {chat_file} for cleanup: {str(e)}"
-                    )
+                    logger.warning(f"Error processing {chat_file} for cleanup: {str(e)}")
                     continue
 
             logger.info(

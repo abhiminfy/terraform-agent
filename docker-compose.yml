@@ -46,22 +46,22 @@ services:
       # Disable Ollama completely
       ENABLE_OLLAMA_API: false
       OLLAMA_BASE_URL: ""
-      
+
       # Configure OpenAI mode
       OPENAI_API_KEY: "local-key"
       OPENAI_API_BASE_URL: "http://api:8000/v1"
-      
+
       # Optional: Disable other model providers
       ENABLE_OPENAI_API: true
-      
+
       # UI Configuration
       WEBUI_NAME: "Terraform Agent"
       DEFAULT_MODELS: "terraform-agent"
       DEFAULT_USER_ROLE: "user"
-      
+
       # Security (optional)
       WEBUI_SECRET_KEY: "your-secret-key-change-me"
-      
+
     ports: ["3000:8080"]
     volumes:
       - open-webui:/app/backend/data

@@ -16,28 +16,28 @@ jobs:
 
     - name: Install dependencies
       run: pip install -r requirements.txt
-      working-directory: ./src  
+      working-directory: ./src
 
     - name: Install linting and testing tools
       run: pip install black isort flake8 mypy pytest
-      
+
 
     - name: Run black formatter check
       run: black --check .
-      working-directory: ./src 
+      working-directory: ./src
 
     - name: Run isort import check
       run: isort --check-only .
-      working-directory: ./src  
+      working-directory: ./src
 
     - name: Run flake8 linter
       run: flake8 .
-      working-directory: ./src  
+      working-directory: ./src
 
     - name: Run mypy static type checker
       run: mypy --ignore-missing-imports .
-      working-directory: ./src  
+      working-directory: ./src
 
     - name: Run pytest
       run: pytest -q
-      working-directory: ./src  
+      working-directory: ./src

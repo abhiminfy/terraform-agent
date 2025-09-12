@@ -1,16 +1,19 @@
+import abc as _abc
 import json
 import logging
-import os
 import re
-import shutil
 import subprocess
 import tempfile
 from datetime import datetime
+from io import StringIO as _ST_StringIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List
 
-import requests
-import yaml
+import hcl2 as _st_hcl2
+
+from src.app.core.config import Settings as _ST_Settings
+from src.app.utils.utils import run_cmd_async as _st_run_cmd_async
+from src.app.utils.utils import secure_tempdir as _st_secure_tempdir
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -48,9 +51,7 @@ class CalculatorTool:
         return (value * percentage) / 100
 
     @staticmethod
-    def compound_interest(
-        principal: float, rate: float, time: float, n: int = 12
-    ) -> float:
+    def compound_interest(principal: float, rate: float, time: float, n: int = 12) -> float:
         """Calculate compound interest for cost projections"""
         return principal * (1 + rate / n) ** (n * time)
 
@@ -59,9 +60,7 @@ class TerraformValidatorTool:
     """Enhanced Terraform code validation and formatting tools with better security and resilience"""
 
     @staticmethod
-    def validate_terraform_syntax(
-        terraform_code: str, timeout: int = 30
-    ) -> Dict[str, Any]:
+    def validate_terraform_syntax(terraform_code: str, timeout: int = 30) -> Dict[str, Any]:
         """Validate Terraform code syntax with timeout and graceful error handling"""
         if not terraform_code or not terraform_code.strip():
             return {
@@ -96,7 +95,8 @@ class TerraformValidatorTool:
                     return {
                         "valid": False,
                         "output": init_result.stdout,
-                        "errors": f"Terraform init failed: {init_result.stderr}",
+                        "errors": f"Terraform init failed: {
+                            init_result.stderr}",
                     }
 
                 # Run terraform validate with timeout
@@ -140,8 +140,7 @@ class TerraformValidatorTool:
                         # Fallback to text output
                         return {
                             "valid": True,
-                            "output": result.stdout
-                            or "Terraform configuration is valid",
+                            "output": result.stdout or "Terraform configuration is valid",
                             "errors": None,
                         }
                 else:
@@ -274,7 +273,9 @@ class TerraformValidatorTool:
 
         # remove CDK tag-based subnet filter; keep vpc-id filter only
         code = re.sub(
-            r'filter\s*{\s*name\s*=\s*"tag:aws-cdk:subnet-type"[^}]*}', "", code
+            r'filter\s*{\s*name\s*=\s*"tag:aws-cdk:subnet-type"[^}]*}',
+            "",
+            code,
         )
 
         # ensure SG reference matches the declared SG name
@@ -282,7 +283,9 @@ class TerraformValidatorTool:
         if m:
             sg = m.group(1)
             code = re.sub(
-                r"aws_security_group\.\w+\.id", f"aws_security_group.{sg}.id", code
+                r"aws_security_group\.\w+\.id",
+                f"aws_security_group.{sg}.id",
+                code,
             )
 
         # apply explicit provider region if provided
@@ -297,9 +300,7 @@ class TerraformValidatorTool:
         return code, notes
 
     @staticmethod
-    def run_fmt_validate_plan_from_code(
-        terraform_code: str, timeout: int = 120
-    ) -> Dict[str, Any]:
+    def run_fmt_validate_plan_from_code(terraform_code: str, timeout: int = 120) -> Dict[str, Any]:
         """
         Write TF code to a temp dir and run:
           - terraform init
@@ -328,11 +329,19 @@ class TerraformValidatorTool:
         def run(cmd, cwd):
             try:
                 p = subprocess.run(
-                    cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout
+                    cmd,
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
                 )
                 return {"rc": p.returncode, "out": p.stdout, "err": p.stderr}
             except FileNotFoundError:
-                return {"rc": 127, "out": "", "err": f"tool not found: {cmd[0]}"}
+                return {
+                    "rc": 127,
+                    "out": "",
+                    "err": f"tool not found: {cmd[0]}",
+                }
             except subprocess.TimeoutExpired:
                 return {
                     "rc": 124,
@@ -341,9 +350,7 @@ class TerraformValidatorTool:
                 }
 
         with tempfile.TemporaryDirectory() as work:
-            Path(work, "main.tf").write_text(
-                terraform_code, encoding="utf-8", errors="ignore"
-            )
+            Path(work, "main.tf").write_text(terraform_code, encoding="utf-8", errors="ignore")
 
             init = run(["terraform", "init", "-input=false", "-no-color"], work)
             fmt = run(["terraform", "fmt", "-check", "-no-color"], work)
@@ -389,7 +396,8 @@ class TerraformValidatorTool:
 class AWSPricingTool:
     """AWS pricing calculator and cost estimation tools"""
 
-    # Updated AWS pricing data (simplified - in production, use AWS Pricing API)
+    # Updated AWS pricing data (simplified - in production, use AWS Pricing
+    # API)
     PRICING_DATA = {
         "ec2": {
             "t2.nano": {"hourly": 0.0058, "monthly": 4.23},
@@ -421,9 +429,7 @@ class AWSPricingTool:
         "vpc": {
             "nat_gateway": {"hourly": 0.045, "monthly": 32.85},
             "data_processing_per_gb": 0.045,
-            "elastic_ip": {
-                "monthly": 3.65
-            },  # when not associated with running instance
+            "elastic_ip": {"monthly": 3.65},  # when not associated with running instance
         },
         "load_balancer": {
             "application": {"hourly": 0.0225, "monthly": 16.43},
@@ -439,7 +445,9 @@ class AWSPricingTool:
         """Estimate EC2 instance costs"""
         if instance_type not in AWSPricingTool.PRICING_DATA["ec2"]:
             return {
-                "error": f"Unknown instance type: {instance_type}. Available types: {list(AWSPricingTool.PRICING_DATA['ec2'].keys())}"
+                "error": f"Unknown instance type: {instance_type}. Available types: {
+                    list(
+                        AWSPricingTool.PRICING_DATA['ec2'].keys())}"
             }
 
         hourly_rate = AWSPricingTool.PRICING_DATA["ec2"][instance_type]["hourly"]
@@ -461,7 +469,9 @@ class AWSPricingTool:
         """Estimate RDS costs"""
         if db_instance_class not in AWSPricingTool.PRICING_DATA["rds"]:
             return {
-                "error": f"Unknown DB instance class: {db_instance_class}. Available types: {list(AWSPricingTool.PRICING_DATA['rds'].keys())}"
+                "error": f"Unknown DB instance class: {db_instance_class}. Available types: {
+                    list(
+                        AWSPricingTool.PRICING_DATA['rds'].keys())}"
             }
 
         hourly_rate = AWSPricingTool.PRICING_DATA["rds"][db_instance_class]["hourly"]
@@ -486,21 +496,23 @@ class AWSPricingTool:
 
     @staticmethod
     def estimate_s3_cost(
-        storage_gb: int, storage_class: str = "standard", requests_per_month: int = 0
+        storage_gb: int,
+        storage_class: str = "standard",
+        requests_per_month: int = 0,
     ) -> Dict[str, Any]:
         """Estimate S3 storage costs"""
         if storage_class not in AWSPricingTool.PRICING_DATA["s3"]:
             return {
-                "error": f"Unknown storage class: {storage_class}. Available types: {list(AWSPricingTool.PRICING_DATA['s3'].keys())}"
+                "error": f"Unknown storage class: {storage_class}. Available types: {
+                    list(
+                        AWSPricingTool.PRICING_DATA['s3'].keys())}"
             }
 
         rate_per_gb = AWSPricingTool.PRICING_DATA["s3"][storage_class]["per_gb_month"]
         monthly_storage_cost = storage_gb * rate_per_gb
 
         # Request pricing (simplified)
-        request_cost = (
-            requests_per_month / 1000
-        ) * 0.0004  # $0.0004 per 1,000 requests
+        request_cost = (requests_per_month / 1000) * 0.0004  # $0.0004 per 1,000 requests
 
         total_monthly = monthly_storage_cost + request_cost
 
@@ -519,16 +531,9 @@ class AWSPricingTool:
         nat_gateways: int = 0, elastic_ips: int = 0, data_transfer_gb: int = 0
     ) -> Dict[str, Any]:
         """Estimate VPC-related costs"""
-        nat_cost = (
-            nat_gateways * AWSPricingTool.PRICING_DATA["vpc"]["nat_gateway"]["monthly"]
-        )
-        eip_cost = (
-            elastic_ips * AWSPricingTool.PRICING_DATA["vpc"]["elastic_ip"]["monthly"]
-        )
-        data_cost = (
-            data_transfer_gb
-            * AWSPricingTool.PRICING_DATA["vpc"]["data_processing_per_gb"]
-        )
+        nat_cost = nat_gateways * AWSPricingTool.PRICING_DATA["vpc"]["nat_gateway"]["monthly"]
+        eip_cost = elastic_ips * AWSPricingTool.PRICING_DATA["vpc"]["elastic_ip"]["monthly"]
+        data_cost = data_transfer_gb * AWSPricingTool.PRICING_DATA["vpc"]["data_processing_per_gb"]
 
         total_monthly = nat_cost + eip_cost + data_cost
 
@@ -572,7 +577,10 @@ class GitIntegrationTool:
                         "error": f"Git init timed out after {timeout} seconds",
                     }
             else:
-                return {"success": True, "message": "Git repository already exists"}
+                return {
+                    "success": True,
+                    "message": "Git repository already exists",
+                }
         except subprocess.CalledProcessError as e:
             return {
                 "success": False,
@@ -667,7 +675,10 @@ yarn-error.log*
                 "message": f".gitignore created successfully for {project_type} project",
             }
         except Exception as e:
-            return {"success": False, "error": f"Failed to create .gitignore: {str(e)}"}
+            return {
+                "success": False,
+                "error": f"Failed to create .gitignore: {str(e)}",
+            }
 
     @staticmethod
     def commit_changes(message: str = None, timeout: int = 30) -> Dict[str, Any]:
@@ -675,12 +686,11 @@ yarn-error.log*
         return GitIntegrationTool.commit_changes_with_validation(message, timeout)
 
     @staticmethod
-    def commit_changes_with_validation(
-        message: str = None, timeout: int = 30
-    ) -> Dict[str, Any]:
+    def commit_changes_with_validation(message: str = None, timeout: int = 30) -> Dict[str, Any]:
         """Commit changes with pre-commit validation"""
         if not message:
-            message = f"Terraform code update - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            message = f"Terraform code update - {
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
         try:
             # Check if git is initialized
@@ -705,9 +715,7 @@ yarn-error.log*
                             open_braces = content.count("{")
                             close_braces = content.count("}")
                             if open_braces != close_braces:
-                                validation_errors.append(
-                                    f"{tf_file.name}: Mismatched braces"
-                                )
+                                validation_errors.append(f"{tf_file.name}: Mismatched braces")
                     except Exception as e:
                         validation_errors.append(f"{tf_file.name}: {str(e)}")
 
@@ -771,7 +779,10 @@ yarn-error.log*
 
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr if e.stderr else str(e)
-            return {"success": False, "error": f"Failed to commit changes: {error_msg}"}
+            return {
+                "success": False,
+                "error": f"Failed to commit changes: {error_msg}",
+            }
         except FileNotFoundError:
             return {
                 "success": False,
@@ -780,9 +791,7 @@ yarn-error.log*
             }
 
     @staticmethod
-    def push_to_github(
-        repo_url: str, branch: str = "main", timeout: int = 60
-    ) -> Dict[str, Any]:
+    def push_to_github(repo_url: str, branch: str = "main", timeout: int = 60) -> Dict[str, Any]:
         """Push changes to GitHub repository with timeout"""
         try:
             # Set remote origin if not exists
@@ -825,7 +834,10 @@ yarn-error.log*
 
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr if e.stderr else str(e)
-            return {"success": False, "error": f"Failed to push to GitHub: {error_msg}"}
+            return {
+                "success": False,
+                "error": f"Failed to push to GitHub: {error_msg}",
+            }
         except FileNotFoundError:
             return {
                 "success": False,
@@ -878,9 +890,7 @@ class InfrastructureAnalyzer:
             for match in all_resources:
                 if len(match) == 2:
                     resource_type, resource_name = match
-                    analysis["resources"].append(
-                        {"type": resource_type, "name": resource_name}
-                    )
+                    analysis["resources"].append({"type": resource_type, "name": resource_name})
                 elif len(match) == 1:  # Module case
                     analysis["resources"].append({"type": "module", "name": match[0]})
 
@@ -1018,30 +1028,16 @@ class InfrastructureAnalyzer:
             # Calculate blast radius score (0-100, higher = more dangerous)
             blast_radius = 0
             critical_count = len(
-                [
-                    c
-                    for c in analysis["security_concerns"]
-                    if c.get("severity") == "CRITICAL"
-                ]
+                [c for c in analysis["security_concerns"] if c.get("severity") == "CRITICAL"]
             )
             high_count = len(
-                [
-                    c
-                    for c in analysis["security_concerns"]
-                    if c.get("severity") == "HIGH"
-                ]
+                [c for c in analysis["security_concerns"] if c.get("severity") == "HIGH"]
             )
             medium_count = len(
-                [
-                    c
-                    for c in analysis["security_concerns"]
-                    if c.get("severity") == "MEDIUM"
-                ]
+                [c for c in analysis["security_concerns"] if c.get("severity") == "MEDIUM"]
             )
 
-            blast_radius = min(
-                100, critical_count * 30 + high_count * 15 + medium_count * 5
-            )
+            blast_radius = min(100, critical_count * 30 + high_count * 15 + medium_count * 5)
             analysis["blast_radius_score"] = blast_radius
 
             # Compliance checks for common frameworks
@@ -1067,17 +1063,13 @@ class InfrastructureAnalyzer:
                 ):
                     compliance_checks.append("❌ PCI DSS: Database publicly accessible")
                 else:
-                    compliance_checks.append(
-                        "✅ PCI DSS: Database access controls look good"
-                    )
+                    compliance_checks.append("✅ PCI DSS: Database access controls look good")
 
             analysis["compliance_checks"] = compliance_checks
 
             # Enhanced cost estimation
-            analysis["estimated_monthly_cost"] = (
-                InfrastructureAnalyzer._estimate_enhanced_cost(
-                    analysis["resources"], terraform_code
-                )
+            analysis["estimated_monthly_cost"] = InfrastructureAnalyzer._estimate_enhanced_cost(
+                analysis["resources"], terraform_code
             )
 
             # Enhanced optimization suggestions
@@ -1197,17 +1189,13 @@ class InfrastructureAnalyzer:
         return round(total_cost, 2)
 
     @staticmethod
-    def _generate_optimization_suggestions(
-        terraform_code: str, resources: List[dict]
-    ) -> List[str]:
+    def _generate_optimization_suggestions(terraform_code: str, resources: List[dict]) -> List[str]:
         """Generate context-aware optimization suggestions"""
         suggestions = []
 
         # Version pinning suggestions
         if "required_version" not in terraform_code:
-            suggestions.append(
-                "📌 Pin Terraform version: add required_version constraint"
-            )
+            suggestions.append("📌 Pin Terraform version: add required_version constraint")
 
         if "required_providers" not in terraform_code:
             suggestions.append("📌 Pin provider versions: add required_providers block")
@@ -1216,9 +1204,7 @@ class InfrastructureAnalyzer:
         if "tags" not in terraform_code and any(
             res["type"].startswith("aws_") for res in resources
         ):
-            suggestions.append(
-                "🏷️ Add consistent resource tags for cost tracking and management"
-            )
+            suggestions.append("🏷️ Add consistent resource tags for cost tracking and management")
 
         # State management suggestions
         if "backend" not in terraform_code:
@@ -1234,24 +1220,18 @@ class InfrastructureAnalyzer:
         # Cost optimization suggestions
         instance_count = len([r for r in resources if r["type"] == "aws_instance"])
         if instance_count > 3:
-            suggestions.append(
-                "💰 Consider using Auto Scaling Groups for better cost management"
-            )
+            suggestions.append("💰 Consider using Auto Scaling Groups for better cost management")
 
         # High availability suggestions
         if (
             "aws_instance" in [r["type"] for r in resources]
             and "availability_zone" not in terraform_code
         ):
-            suggestions.append(
-                "🌍 Distribute resources across multiple AZs for high availability"
-            )
+            suggestions.append("🌍 Distribute resources across multiple AZs for high availability")
 
         # Monitoring suggestions
         if len(resources) > 5 and "cloudwatch" not in terraform_code.lower():
-            suggestions.append(
-                "📊 Add CloudWatch monitoring and alerting for your infrastructure"
-            )
+            suggestions.append("📊 Add CloudWatch monitoring and alerting for your infrastructure")
 
         # Module suggestions for complex deployments
         if len(resources) > 10 and "module" not in terraform_code:
@@ -1269,9 +1249,7 @@ class InfrastructureAnalyzer:
 
         # Check for version constraints
         if "required_version" not in terraform_code:
-            suggestions.append(
-                "Add Terraform version constraints using required_version"
-            )
+            suggestions.append("Add Terraform version constraints using required_version")
 
         # Check for provider version constraints
         if "required_providers" not in terraform_code:
@@ -1294,22 +1272,15 @@ class InfrastructureAnalyzer:
             "data." not in terraform_code
             and len(re.findall(r'resource\s+"aws_', terraform_code)) > 3
         ):
-            suggestions.append(
-                "Consider using data sources to reference existing infrastructure"
-            )
+            suggestions.append("Consider using data sources to reference existing infrastructure")
 
         # Check for modules
-        if (
-            len(re.findall(r'resource\s+"', terraform_code)) > 10
-            and "module" not in terraform_code
-        ):
+        if len(re.findall(r'resource\s+"', terraform_code)) > 10 and "module" not in terraform_code:
             suggestions.append("Consider organizing code into reusable modules")
 
         # Check for variables
         if '"${var.' not in terraform_code and "var." not in terraform_code:
-            suggestions.append(
-                "Use variables to make your code more flexible and reusable"
-            )
+            suggestions.append("Use variables to make your code more flexible and reusable")
 
         # Check for outputs
         if "output" not in terraform_code:
@@ -1339,7 +1310,10 @@ class FileOperations:
                 "file_size": file_size,
             }
         except Exception as e:
-            return {"success": False, "error": f"Failed to save file: {str(e)}"}
+            return {
+                "success": False,
+                "error": f"Failed to save file: {str(e)}",
+            }
 
     @staticmethod
     def create_terraform_structure(
@@ -1405,14 +1379,14 @@ output "region" {
 """,
                 "versions.tf": """terraform {
   required_version = ">= 1.0"
-  
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
   }
-  
+
   # Uncomment and configure for remote state
   # backend "s3" {
   #   bucket = "your-terraform-state-bucket"
@@ -1481,7 +1455,7 @@ terraform {{
 
 module "main" {{
   source = "../.."
-  
+
   aws_region   = var.aws_region
   environment  = "{env}"
   project_name = var.project_name
@@ -1501,7 +1475,10 @@ module "main" {{
             }
 
         except Exception as e:
-            return {"success": False, "error": f"Failed to create structure: {str(e)}"}
+            return {
+                "success": False,
+                "error": f"Failed to create structure: {str(e)}",
+            }
 
     @staticmethod
     def read_terraform_file(filename: str = "main.tf") -> Dict[str, Any]:
@@ -1509,7 +1486,10 @@ module "main" {{
         try:
             file_path = Path(filename)
             if not file_path.exists():
-                return {"success": False, "error": f"File {filename} does not exist"}
+                return {
+                    "success": False,
+                    "error": f"File {filename} does not exist",
+                }
 
             content = file_path.read_text(encoding="utf-8")
             file_size = file_path.stat().st_size
@@ -1521,7 +1501,10 @@ module "main" {{
                 "file_size": file_size,
             }
         except Exception as e:
-            return {"success": False, "error": f"Failed to read file: {str(e)}"}
+            return {
+                "success": False,
+                "error": f"Failed to read file: {str(e)}",
+            }
 
 
 class TerraformPlanAnalyzer:
@@ -1557,7 +1540,9 @@ class TerraformPlanAnalyzer:
             analysis["resources_to_destroy"] = len(destroys)
 
             # Extract plan summary
-            summary_pattern = r"Plan:\s+(\d+)\s+to\s+add,\s+(\d+)\s+to\s+change,\s+(\d+)\s+to\s+destroy"
+            summary_pattern = (
+                r"Plan:\s+(\d+)\s+to\s+add,\s+(\d+)\s+to\s+change,\s+(\d+)\s+to\s+destroy"
+            )
             summary_match = re.search(summary_pattern, plan_output)
             if summary_match:
                 analysis["summary"] = {
@@ -1567,9 +1552,7 @@ class TerraformPlanAnalyzer:
                 }
 
             # Look for warnings and errors
-            warning_lines = [
-                line for line in plan_output.split("\n") if "Warning:" in line
-            ]
+            warning_lines = [line for line in plan_output.split("\n") if "Warning:" in line]
             error_lines = [line for line in plan_output.split("\n") if "Error:" in line]
 
             analysis["warnings"] = warning_lines
@@ -1630,27 +1613,24 @@ class StrandsTools:
 
         for tool_name, command in tool_checks:
             try:
-                result = subprocess.run(
-                    command, capture_output=True, text=True, timeout=5
-                )
+                result = subprocess.run(command, capture_output=True, text=True, timeout=5)
                 health["tools"][tool_name] = {
                     "available": result.returncode == 0,
-                    "version": (
-                        result.stdout.split("\n")[0] if result.returncode == 0 else None
-                    ),
+                    "version": (result.stdout.split("\n")[0] if result.returncode == 0 else None),
                 }
 
                 if result.returncode != 0:
                     health["issues"].append(f"{tool_name} not working properly")
 
             except (FileNotFoundError, subprocess.TimeoutExpired):
-                health["tools"][tool_name] = {"available": False, "version": None}
+                health["tools"][tool_name] = {
+                    "available": False,
+                    "version": None,
+                }
                 health["issues"].append(f"{tool_name} not installed or not in PATH")
 
         # Determine overall status
-        terraform_available = (
-            health["tools"].get("terraform", {}).get("available", False)
-        )
+        terraform_available = health["tools"].get("terraform", {}).get("available", False)
         if not terraform_available:
             health["overall_status"] = "degraded"
 
@@ -1693,7 +1673,7 @@ def calculate(operation: str, a: float, b: float = None) -> float:
 # Export main functions for direct import
 
 
-# ------------- ADDED: strict static sanity checks for ECS Fargate behind ALB (NAT-less) -------------
+# ------------- ADDED: strict static sanity checks for ECS Fargate behind
 def static_sanity_checks(hcl_text: str) -> List[str]:
     """
     Strict invariants for our ECS Fargate behind ALB, NAT-less pattern.
@@ -1705,9 +1685,7 @@ def static_sanity_checks(hcl_text: str) -> List[str]:
 
     # 1) Disallow legacy aws_alb*
     if re.search(r"\\baws_alb(?:_listener|_target_group)?\\b", txt):
-        issues.append(
-            "Use aws_lb/aws_lb_listener/aws_lb_target_group; aws_alb* is not supported."
-        )
+        issues.append("Use aws_lb/aws_lb_listener/aws_lb_target_group; aws_alb* is not supported.")
 
     # 2) Require ALB + TG + Listener
     if not re.search(r'\\bresource\\s+"aws_lb"\\b', txt):
@@ -1721,7 +1699,9 @@ def static_sanity_checks(hcl_text: str) -> List[str]:
 
     # Listener must NOT have tags
     if re.search(
-        r'\\bresource\\s+"aws_lb_listener"\\s+"[^"]+"\\s*{[^}]*\\btags\\s*=', txt, re.S
+        r'\\bresource\\s+"aws_lb_listener"\\s+"[^"]+"\\s*{[^}]*\\btags\\s*=',
+        txt,
+        re.S,
     ):
         issues.append("aws_lb_listener does not support tags.")
 
@@ -1742,9 +1722,7 @@ def static_sanity_checks(hcl_text: str) -> List[str]:
         if m:
             net = m.group("body")
             if "assign_public_ip = false" not in net:
-                issues.append(
-                    "ECS service must set assign_public_ip = false (NAT-less design)."
-                )
+                issues.append("ECS service must set assign_public_ip = false (NAT-less design).")
             if re.search(r"aws_subnet\\.public", net):
                 issues.append(
                     "ECS service should use private subnets (not public) in network_configuration.subnets."
@@ -1824,7 +1802,8 @@ __all__ = [
 def extract_best_terraform_block(response_text: str) -> str:
     # Heuristically choose the best Terraform/HCL block from an LLM reply.
     # Prefers the largest fenced block labelled ```terraform|hcl|tf```,
-    # falls back to the largest fenced block of any language, then to HCL-looking text.
+    # falls back to the largest fenced block of any language, then to
+    # HCL-looking text.
     import re
     from typing import List
 
@@ -1871,9 +1850,7 @@ def extract_best_terraform_block(response_text: str) -> str:
 
 
 # ---------------- Minimal scaffold injector (added) ----------------
-def ensure_minimal_scaffold(
-    terraform_code: str, default_region: str = "us-east-1"
-) -> str:
+def ensure_minimal_scaffold(terraform_code: str, default_region: str = "us-east-1") -> str:
     # If terraform/provider scaffold is missing, add a minimal, pinned setup.
     # Does NOT overwrite existing blocks.
     code = terraform_code or ""
@@ -1895,21 +1872,12 @@ def ensure_minimal_scaffold(
             "}\n"
         )
     if needs_provider:
-        scaffold_parts.append(
-            'provider "aws" {\n' f'  region = "{default_region}"\n' "}\n"
-        )
+        scaffold_parts.append('provider "aws" {\n' f'  region = "{default_region}"\n' "}\n")
     return ("\n".join(scaffold_parts) + "\n" + code).strip()
 
 
 # === APPEND: pluggable tools + HCL parsing (non-destructive) ===
-import abc as _abc
-from io import StringIO as _ST_StringIO
 
-import hcl2 as _st_hcl2
-
-from src.app.core.config import Settings as _ST_Settings
-from src.app.utils.utils import run_cmd_async as _st_run_cmd_async
-from src.app.utils.utils import secure_tempdir as _st_secure_tempdir
 
 _ST = _ST_Settings()
 
@@ -1928,15 +1896,17 @@ class TerraformValidateTool(Tool):
         try:
             _st_hcl2.load(_ST_StringIO(tf_code))
         except Exception as e:
-            return {"success": False, "data": {}, "error": f"HCL parse error: {e}"}
+            return {
+                "success": False,
+                "data": {},
+                "error": f"HCL parse error: {e}",
+            }
         with _st_secure_tempdir("tf_val_v2_") as d:
             import os as _os
 
             with open(_os.path.join(d, "main.tf"), "w", encoding="utf-8") as f:
                 f.write(tf_code)
-            rc, out, err = await _st_run_cmd_async(
-                _ST.TF_BIN, "init", "-input=false", cwd=d
-            )
+            rc, out, err = await _st_run_cmd_async(_ST.TF_BIN, "init", "-input=false", cwd=d)
             if rc != 0:
                 return {
                     "success": False,
