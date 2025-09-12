@@ -95,8 +95,7 @@ class TerraformValidatorTool:
                     return {
                         "valid": False,
                         "output": init_result.stdout,
-                        "errors": f"Terraform init failed: {
-                            init_result.stderr}",
+                        "errors": f"Terraform init failed: {init_result.stderr}",
                     }
 
                 # Run terraform validate with timeout

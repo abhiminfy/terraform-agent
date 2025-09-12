@@ -5,12 +5,13 @@ import time
 import traceback
 
 import google.generativeai as genai
-from backend.app.api.routes import router
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
+
+from src.app.api.routes import router
 
 # --- UTF-8 bootstrap for Windows consoles with emojis in logs ---
 try:
@@ -161,11 +162,7 @@ async def log_requests(request: Request, call_next):
 
     process_time = time.time() - start_time
     logger.info(
-        f"[OUT] {
-            request.method} {
-            request.url.path} - {
-                response.status_code} ({
-                    process_time:.2f}s)"
+        f"[OUT] {request.method} {request.url.path} - {response.status_code} ({process_time:.2f}s)"
     )
 
     return response
