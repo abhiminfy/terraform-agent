@@ -19,7 +19,7 @@ jobs:
       working-directory: ./src
 
     - name: Install linting and testing tools
-      run: pip install black isort flake8 flake8-pyproject mypy pytest
+      run:  pip install black isort flake8 mypy pytest
 
     - name: Run black formatter check
       run: black --check --line-length 100 .
@@ -30,7 +30,7 @@ jobs:
       working-directory: ./src
 
     - name: Run flake8 linter
-      run: flake8 . --config=../pyproject.toml
+      run: flake8 .
       working-directory: ./src
 
     - name: Run mypy static type checker
