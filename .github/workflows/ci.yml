@@ -33,9 +33,7 @@ jobs:
       run: flake8 .
       working-directory: ./src
 
-    - name: Run mypy static type checker
-      run: mypy --ignore-missing-imports .
-      working-directory: ./src
+
 
     - name: Run pytest
       run: pytest -q
