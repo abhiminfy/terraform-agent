@@ -9,3 +9,6 @@ exclude =
     build,
     dist,
     *.egg-info
+per-file-ignores =
+    */tests/*.py:F401
+    tests/*.py:F401
