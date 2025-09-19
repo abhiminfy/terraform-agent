@@ -1,700 +1,547 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+import asyncio
+import hashlib
 import json
 import logging
+import os
+import re
+import shutil
+
+# Note: we keep stdlib subprocess to avoid extra deps and match your project
 import subprocess
 import tempfile
+from collections import OrderedDict
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-from cachetools import TTLCache as _TTLCache
-
-from src.app.core.config import Settings as _IC_Settings
-from src.app.utils.utils import run_cmd_async as _ic_run_cmd_async
-from src.app.utils.utils import secure_tempdir as _ic_secure_tempdir
+from threading import RLock
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
-class InfracostIntegration:
-    """Real Infracost CLI integration with budget management"""
+# -----------------------
+# Settings / environment
+# -----------------------
+@dataclass(frozen=True)
+class _ICSettings:
+    TF_BIN: str = os.getenv("TF_BIN", "terraform")
+    INFRACOST_BIN: str = os.getenv("INFRACOST_BIN", "infracost")
+    INFRACOST_API_KEY: Optional[str] = os.getenv("INFRACOST_API_KEY")
 
-    def __init__(self):
-        self.infracost_available = self._check_infracost_availability()
-        self.budgets = self._load_budgets()
+    # Default workspace + budgets
+    DEFAULT_WORKSPACE: str = os.getenv("INFRACOST_WORKSPACE", "default")
+    BUDGETS_FILE: str = os.getenv("INFRACOST_BUDGETS_FILE", "budgets.json")
 
-    def _check_infracost_availability(self) -> bool:
-        """Check if Infracost CLI is available and configured"""
+    # Timeouts (seconds)
+    TF_INIT_TIMEOUT: int = int(os.getenv("TF_INIT_TIMEOUT", "60"))
+    TF_PLAN_TIMEOUT: int = int(os.getenv("TF_PLAN_TIMEOUT", "90"))
+    TF_SHOW_TIMEOUT: int = int(os.getenv("TF_SHOW_TIMEOUT", "60"))
+    IC_TIMEOUT: int = int(os.getenv("INFRACOST_TIMEOUT", "60"))
+
+    # Extra flags
+    TF_INPUT: str = os.getenv("TF_INPUT", "false")  # do not prompt in non-interactive
+    TF_NO_COLOR: str = os.getenv("TF_NO_COLOR", "true")
+
+    # Optional Terraform CLI args (var-files etc.) – applied only to *this* module
+    TF_CLI_ARGS: str = os.getenv("TF_CLI_ARGS_INTEG", "")  # keep your global TF_CLI_ARGS untouched
+
+    # Currency (default USD)
+    CURRENCY: str = (os.getenv("INFRACOST_CURRENCY", "USD") or "USD").upper()
+
+
+_S = _ICSettings()
+
+
+# -----------------------
+# Small in-memory cache
+# -----------------------
+class _LRUCache:
+    """Tiny threadsafe LRU cache for cost breakdown results keyed by (hash(tf), currency)."""
+
+    def __init__(self, maxsize: int = 64):
+        self.maxsize = maxsize
+        self._data: OrderedDict[str, Any] = OrderedDict()
+        self._lock = RLock()
+
+    def _mk(self, key: str) -> str:
+        return key
+
+    def get(self, key: str) -> Any:
+        with self._lock:
+            k = self._mk(key)
+            if k in self._data:
+                self._data.move_to_end(k)
+                return self._data[k]
+            return None
+
+    def set(self, key: str, value: Any):
+        with self._lock:
+            k = self._mk(key)
+            self._data[k] = value
+            self._data.move_to_end(k)
+            if len(self._data) > self.maxsize:
+                self._data.popitem(last=False)
+
+
+_cache = _LRUCache(maxsize=64)
+
+
+# -----------------------
+# Helpers
+# -----------------------
+def _run(
+    cmd: List[str],
+    cwd: Optional[str] = None,
+    timeout: int = 60,
+    env: Optional[Dict[str, str]] = None,
+) -> Tuple[int, str, str]:
+    try:
+        logger.debug("Running: %s (cwd=%s)", " ".join(cmd), cwd or os.getcwd())
+        p = subprocess.run(
+            cmd,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+            check=False,
+        )
+        return p.returncode, p.stdout, p.stderr
+    except subprocess.TimeoutExpired as e:
+        return 124, "", f"Command timed out after {timeout}s: {e}"
+    except FileNotFoundError:
+        return 127, "", f"Binary not found: {cmd[0]}"
+    except Exception as e:
+        return 1, "", f"Command failed: {e}"
+
+
+async def _run_async(
+    *cmd: str, cwd: Optional[str] = None, timeout: int = 60, env: Optional[Dict[str, str]] = None
+):
+    try:
+        logger.debug("Running (async): %s (cwd=%s)", " ".join(cmd), cwd or os.getcwd())
+        p = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
         try:
-            result = subprocess.run(
-                ["infracost", "--version"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
+            out_b, err_b = await asyncio.wait_for(p.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            p.kill()
+            return 124, "", f"Command timed out after {timeout}s"
+        return p.returncode, (out_b or b"").decode(), (err_b or b"").decode()
+    except FileNotFoundError:
+        return 127, "", f"Binary not found: {cmd[0]}"
+    except Exception as e:
+        return 1, "", f"Command failed: {e}"
 
-            if result.returncode == 0:
-                # Check if API key is configured
-                auth_result = subprocess.run(
-                    ["infracost", "auth", "status"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                return auth_result.returncode == 0
-            return False
 
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return False
+def _secure_tempdir(prefix: str = "ic_tf_"):
+    return tempfile.TemporaryDirectory(prefix=prefix)
 
-    def _load_budgets(self) -> Dict[str, Any]:
-        """Load budget configurations from file"""
-        budget_file = Path("budgets.json")
 
-        default_budgets = {
-            "workspaces": {
-                "default": {
-                    "monthly_limit": 100.0,
-                    "alert_thresholds": [50.0, 80.0, 100.0],
-                    "currency": "USD",
-                },
-                "development": {
-                    "monthly_limit": 200.0,
-                    "alert_thresholds": [100.0, 150.0, 200.0],
-                    "currency": "USD",
-                },
-                "staging": {
-                    "monthly_limit": 500.0,
-                    "alert_thresholds": [250.0, 400.0, 500.0],
-                    "currency": "USD",
-                },
-                "production": {
-                    "monthly_limit": 2000.0,
-                    "alert_thresholds": [1000.0, 1500.0, 2000.0],
-                    "currency": "USD",
-                },
-            },
-            "global_settings": {
-                "default_currency": "USD",
-                "enable_alerts": True,
-                "cost_increase_threshold_percent": 20.0,
-            },
-        }
+def _hash_tf(tf_code: str, usage_yaml: Optional[str], currency: str) -> str:
+    h = hashlib.sha256()
+    h.update(tf_code.encode("utf-8"))
+    if usage_yaml:
+        h.update(b"|usage|")
+        h.update(usage_yaml.encode("utf-8"))
+    h.update(f"|{currency}|".encode("utf-8"))
+    return h.hexdigest()
 
-        if budget_file.exists():
+
+def _write_tf_files(dirpath: str, tf_code: str, usage_yaml: Optional[str] = None):
+    Path(dirpath, "main.tf").write_text(tf_code, encoding="utf-8")
+    if usage_yaml:
+        Path(dirpath, "usage.yml").write_text(usage_yaml, encoding="utf-8")
+
+
+def _terraform_plan_json(dirpath: str) -> Tuple[bool, str, str]:
+    env = dict(os.environ)
+    # Apply only our module-local TF_CLI_ARGS to keep caller-global TF_CLI_ARGS intact.
+    if _S.TF_CLI_ARGS:
+        env["TF_CLI_ARGS"] = _S.TF_CLI_ARGS
+
+    rc, out, err = _run(
+        [_S.TF_BIN, "init", "-no-color", f"-input={_S.TF_INPUT}"],
+        cwd=dirpath,
+        timeout=_S.TF_INIT_TIMEOUT,
+        env=env,
+    )
+    if rc != 0:
+        return False, "", f"terraform init failed: {err or out}"
+
+    # Create machine-readable plan
+    plan_path = str(Path(dirpath, "plan.tfplan"))
+    rc, out, err = _run(
+        [_S.TF_BIN, "plan", "-no-color", f"-input={_S.TF_INPUT}", "-out", plan_path],
+        cwd=dirpath,
+        timeout=_S.TF_PLAN_TIMEOUT,
+        env=env,
+    )
+    if rc != 0:
+        return False, "", f"terraform plan failed: {err or out}"
+
+    rc, out, err = _run(
+        [_S.TF_BIN, "show", "-json", plan_path],
+        cwd=dirpath,
+        timeout=_S.TF_SHOW_TIMEOUT,
+        env=env,
+    )
+    if rc != 0:
+        return False, "", f"terraform show -json failed: {err or out}"
+
+    plan_json_path = str(Path(dirpath, "plan.json"))
+    Path(plan_json_path).write_text(out, encoding="utf-8")
+    return True, plan_json_path, ""
+
+
+def _parse_infracost_json(txt: str) -> Tuple[float, float, str, List[Dict[str, Any]]]:
+    """
+    Support both legacy and modern Infracost JSON formats.
+    Returns: (monthly_cost, yearly_cost, currency, resource_breakdown[])
+    """
+    data = {}
+    try:
+        data = json.loads(txt or "{}")
+    except Exception:
+        return 0.0, 0.0, _S.CURRENCY, []
+
+    currency = (data.get("currency") or _S.CURRENCY).upper()
+
+    # Newer format: projects[*].breakdown.totalMonthlyCost and .resources[*]
+    total_monthly = 0.0
+    resources: List[Dict[str, Any]] = []
+    projects = data.get("projects") or []
+
+    if projects:
+        for p in projects:
+            b = p.get("breakdown") or {}
+            # cost as string, e.g. "123.45"
             try:
-                with open(budget_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
-                logger.warning(f"Failed to load budgets.json: {e}, using defaults")
-                return default_budgets
-        else:
-            # Create default budget file
-            try:
-                with open(budget_file, "w", encoding="utf-8") as f:
-                    json.dump(default_budgets, f, indent=2)
-                logger.info("Created default budgets.json file")
-            except IOError as e:
-                logger.warning(f"Failed to create budgets.json: {e}")
-
-            return default_budgets
-
-    def generate_cost_estimate(
-        self, terraform_code: str, workspace: str = "default"
-    ) -> Dict[str, Any]:
-        """Generate comprehensive cost estimate using Infracost CLI"""
-        if not self.infracost_available:
-            return {
-                "success": False,
-                "error": "Infracost CLI not available or not configured",
-                "fallback_available": True,
-            }
-
-        if not terraform_code or not terraform_code.strip():
-            return {"success": False, "error": "Empty Terraform code provided"}
-
+                total_monthly += float(b.get("totalMonthlyCost") or 0)
+            except Exception:
+                pass
+            for r in b.get("resources") or []:
+                name = r.get("name") or r.get("address") or r.get("resourceType") or "resource"
+                try:
+                    rcost = float(r.get("monthlyCost") or 0)
+                except Exception:
+                    rcost = 0.0
+                resources.append({"name": name, "monthly_cost": rcost})
+    else:
+        # Legacy format (top-level totalMonthlyCost)
         try:
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_path = Path(temp_dir)
+            total_monthly = float(data.get("totalMonthlyCost") or 0)
+        except Exception:
+            total_monthly = 0.0
+        # Try to build a minimal breakdown if present
+        for r in data.get("resources") or []:
+            name = r.get("name") or r.get("address") or r.get("resourceType") or "resource"
+            try:
+                rcost = float(r.get("monthlyCost") or 0)
+            except Exception:
+                rcost = 0.0
+            resources.append({"name": name, "monthly_cost": rcost})
 
-                # Write Terraform code
-                main_tf = temp_path / "main.tf"
-                main_tf.write_text(terraform_code, encoding="utf-8", errors="ignore")
+    yearly = total_monthly * 12.0
+    # Top N resources by cost
+    resources.sort(key=lambda x: x.get("monthly_cost", 0.0), reverse=True)
+    return total_monthly, yearly, currency, resources[:25]
 
-                # Create a basic terraform block if not present
-                if "terraform {" not in terraform_code:
-                    versions_tf = temp_path / "versions.tf"
-                    versions_tf.write_text(
-                        """
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
+
+def _read_budgets() -> Dict[str, Any]:
+    p = Path(_S.BUDGETS_FILE)
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning("budgets.json is invalid; recreating")
+    return {}
+
+
+def _write_budgets(b: Dict[str, Any]) -> bool:
+    try:
+        Path(_S.BUDGETS_FILE).write_text(
+            json.dumps(b, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        return True
+    except Exception as e:
+        logger.error("Failed to write budgets: %s", e)
+        return False
+
+
+def _budget_analysis(workspace: str, monthly_cost: float) -> Dict[str, Any]:
+    budgets = _read_budgets()
+    ws = budgets.get(workspace) or {}
+    limit = float(ws.get("monthly_limit") or 0.0)
+    thresholds = ws.get("alert_thresholds") or [0.5, 0.8, 1.0]
+
+    alert_level = "GREEN"
+    utilization_pct = 0.0
+    if limit > 0:
+        utilization_pct = (monthly_cost / limit) * 100.0
+        if utilization_pct >= (thresholds[-1] * 100):
+            alert_level = "RED"
+        elif utilization_pct >= (thresholds[0] * 100):
+            alert_level = "YELLOW"
+
+    return {
+        "workspace": workspace,
+        "monthly_limit": limit,
+        "thresholds": thresholds,
+        "budget_utilization_percent": utilization_pct,
+        "alert_level": alert_level,
     }
-  }
-}
 
-provider "aws" {
-  region = "us-east-1"  # Default region for cost estimation
-}
-""",
-                        encoding="utf-8",
-                    )
 
-                # Initialize Terraform
-                init_result = subprocess.run(
-                    ["terraform", "init", "-input=false"],
-                    cwd=temp_dir,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                )
+# -----------------------
+# Public Integration API
+# -----------------------
+class InfracostIntegration:
+    def __init__(self):
+        self.infracost_available = self._check_infracost()
 
-                if init_result.returncode != 0:
-                    return {
-                        "success": False,
-                        "error": f"Terraform init failed: {init_result.stderr}",
-                        "fallback_available": True,
-                    }
+    def _check_infracost(self) -> bool:
+        rc, _, _ = _run([_S.INFRACOST_BIN, "--version"], timeout=8)
+        return rc == 0
 
-                # Generate plan
-                plan_result = subprocess.run(
-                    ["terraform", "plan", "-out=tfplan", "-input=false"],
-                    cwd=temp_dir,
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
+    # ---- Breakdown (HCL) ----------------------------------------------------
+    def generate_cost_estimate(
+        self,
+        terraform_code: str,
+        workspace: str = _S.DEFAULT_WORKSPACE,
+        usage_yaml: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        1) Writes TF to a temp dir (and optional usage.yml)
+        2) Terraform init/plan/show -json
+        3) infracost breakdown --path plan.json (preferred), else --path <dir>
+        """
+        if not terraform_code or not terraform_code.strip():
+            return {"success": False, "error": "terraform_code required"}
 
-                if plan_result.returncode != 0:
-                    return {
-                        "success": False,
-                        "error": f"Terraform init failed: {init_result.stderr}",
-                        "fallback_available": True,
-                    }
+        currency = _S.CURRENCY
+        cache_key = f"breakdown:{_hash_tf(terraform_code, usage_yaml, currency)}"
+        cached = _cache.get(cache_key)
+        if cached:
+            return cached
 
-                # Generate Infracost breakdown
-                breakdown_result = subprocess.run(
+        if not self.infracost_available:
+            return {"success": False, "error": "Infracost CLI not available"}
+
+        env = dict(os.environ)
+        if _S.INFRACOST_API_KEY:
+            env["INFRACOST_API_KEY"] = _S.INFRACOST_API_KEY
+
+        with _secure_tempdir("ic_hcl_") as d:
+            _write_tf_files(d, terraform_code, usage_yaml=usage_yaml)
+
+            ok, plan_json_path, err = _terraform_plan_json(d)
+            if not ok:
+                return {"success": False, "error": err}
+
+            # Prefer pointing Infracost at the plan.json for accuracy
+            cmd = [
+                _S.INFRACOST_BIN,
+                "breakdown",
+                "--path",
+                plan_json_path,
+                "--format",
+                "json",
+                "--no-color",
+                "--project-name",
+                workspace,
+                "--currency",
+                currency,
+            ]
+            if usage_yaml:
+                cmd += ["--usage-file", str(Path(d, "usage.yml"))]
+
+            rc, out, err = _run(cmd, cwd=d, timeout=_S.IC_TIMEOUT, env=env)
+            if rc != 0:
+                # fallback to pointing at dir
+                rc2, out2, err2 = _run(
                     [
-                        "infracost",
+                        _S.INFRACOST_BIN,
                         "breakdown",
                         "--path",
-                        temp_dir,
+                        d,
                         "--format",
                         "json",
+                        "--no-color",
+                        "--project-name",
+                        workspace,
+                        "--currency",
+                        currency,
                     ],
-                    capture_output=True,
-                    text=True,
-                    timeout=90,
+                    cwd=d,
+                    timeout=_S.IC_TIMEOUT,
+                    env=env,
                 )
+                if rc2 != 0:
+                    return {"success": False, "error": f"infracost breakdown failed: {err or err2}"}
+                out = out2
 
-                if breakdown_result.returncode != 0:
-                    return {
-                        "success": False,
-                        "error": f"Infracost breakdown failed: {
-                            breakdown_result.stderr}",
-                        "fallback_available": True,
-                    }
-
-                # Parse Infracost output
-                try:
-                    infracost_data = json.loads(breakdown_result.stdout)
-                except json.JSONDecodeError as e:
-                    return {
-                        "success": False,
-                        "error": f"Failed to parse Infracost output: {e}",
-                        "fallback_available": True,
-                    }
-
-                # Process and format results
-                return self._process_infracost_output(infracost_data, workspace)
-
-        except subprocess.TimeoutExpired as e:
-            return {
-                "success": False,
-                "error": f"Infracost operation timed out: {e}",
-                "fallback_available": True,
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Unexpected error during cost estimation: {e}",
-                "fallback_available": True,
-            }
-
-    def _process_infracost_output(
-        self, infracost_data: Dict[str, Any], workspace: str
-    ) -> Dict[str, Any]:
-        """Process Infracost output and apply budget checks"""
-        projects = infracost_data.get("projects", [])
-
-        if not projects:
-            return {
-                "success": False,
-                "error": "No cost data found in Infracost output",
-            }
-
-        # Extract cost information
-        total_monthly_cost = 0.0
-        total_hourly_cost = 0.0
-        resource_breakdown = []
-
-        for project in projects:
-            breakdown = project.get("breakdown", {})
-            resources = breakdown.get("resources", [])
-
-            project_monthly = breakdown.get("totalMonthlyCost")
-            project_hourly = breakdown.get("totalHourlyCost")
-
-            if project_monthly:
-                total_monthly_cost += float(project_monthly)
-            if project_hourly:
-                total_hourly_cost += float(project_hourly)
-
-            # Process individual resources
-            for resource in resources:
-                resource_cost = resource.get("monthlyCost")
-                if resource_cost:
-                    resource_breakdown.append(
-                        {
-                            "name": resource.get("name", "unknown"),
-                            "resource_type": resource.get("resourceType", "unknown"),
-                            "monthly_cost": float(resource_cost),
-                            "hourly_cost": float(resource.get("hourlyCost", 0)),
-                            "cost_components": self._extract_cost_components(resource),
-                        }
-                    )
-
-        # Sort resources by cost
-        resource_breakdown.sort(key=lambda x: x["monthly_cost"], reverse=True)
-
-        # Apply budget checks
-        budget_analysis = self._check_budget_compliance(total_monthly_cost, workspace)
-
-        # Calculate additional metrics
-        yearly_cost = total_monthly_cost * 12
-        daily_cost = total_monthly_cost / 30
-
-        return {
+        monthly, yearly, currency, resources = _parse_infracost_json(out)
+        result = {
             "success": True,
+            "currency": currency,
             "cost_estimate": {
-                "monthly_cost": round(total_monthly_cost, 2),
-                "hourly_cost": round(total_hourly_cost, 4),
-                "daily_cost": round(daily_cost, 2),
-                "yearly_cost": round(yearly_cost, 2),
-                "currency": "USD",
+                "monthly_cost": monthly,
+                "yearly_cost": yearly,
+                "daily_cost": monthly / 30.0 if monthly else 0.0,
             },
-            "resource_breakdown": resource_breakdown[:10],  # Top 10 most expensive resources
-            "budget_analysis": budget_analysis,
-            "total_resources": len(resource_breakdown),
-            "workspace": workspace,
-            "generated_at": datetime.now().isoformat(),
-            "infracost_version": self._get_infracost_version(),
+            "resource_breakdown": resources,
+            "budget_analysis": _budget_analysis(workspace, monthly),
+            "generated_at": datetime.utcnow().isoformat() + "Z",
         }
+        _cache.set(cache_key, result)
+        return result
 
-    def _extract_cost_components(self, resource: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Extract cost components for a resource"""
-        components = []
-        cost_components = resource.get("costComponents", [])
-
-        for component in cost_components:
-            components.append(
-                {
-                    "name": component.get("name", "unknown"),
-                    "unit": component.get("unit", ""),
-                    "hourly_quantity": component.get("hourlyQuantity"),
-                    "monthly_quantity": component.get("monthlyQuantity"),
-                    "hourly_cost": float(component.get("hourlyCost", 0)),
-                    "monthly_cost": float(component.get("monthlyCost", 0)),
-                }
-            )
-
-        return components
-
-    def _check_budget_compliance(self, estimated_cost: float, workspace: str) -> Dict[str, Any]:
-        """Check budget compliance and generate alerts"""
-        workspace_budget = self.budgets.get("workspaces", {}).get(workspace)
-
-        if not workspace_budget:
-            workspace_budget = self.budgets.get("workspaces", {}).get(
-                "default",
-                {
-                    "monthly_limit": 100.0,
-                    "alert_thresholds": [50.0, 80.0, 100.0],
-                    "currency": "USD",
-                },
-            )
-
-        monthly_limit = workspace_budget.get("monthly_limit", 100.0)
-        alert_thresholds = workspace_budget.get("alert_thresholds", [50.0, 80.0, 100.0])
-
-        budget_utilization = (estimated_cost / monthly_limit) * 100 if monthly_limit > 0 else 0
-
-        # Determine alert level
-        alert_level = "GREEN"
-        triggered_threshold = None
-
-        for threshold in sorted(alert_thresholds):
-            if estimated_cost >= threshold:
-                triggered_threshold = threshold
-                if threshold == alert_thresholds[-1]:  # Highest threshold
-                    alert_level = "RED"
-                elif threshold == alert_thresholds[-2]:  # Second highest
-                    alert_level = "YELLOW"
-                else:
-                    alert_level = "ORANGE"
-
-        over_budget = estimated_cost > monthly_limit
-        remaining_budget = max(0, monthly_limit - estimated_cost)
-
-        return {
-            "monthly_limit": monthly_limit,
-            "estimated_cost": estimated_cost,
-            "remaining_budget": round(remaining_budget, 2),
-            "budget_utilization_percent": round(budget_utilization, 1),
-            "over_budget": over_budget,
-            "alert_level": alert_level,
-            "triggered_threshold": triggered_threshold,
-            "recommendations": self._generate_budget_recommendations(
-                estimated_cost, monthly_limit, over_budget
-            ),
-        }
-
-    def _generate_budget_recommendations(
-        self, cost: float, limit: float, over_budget: bool
-    ) -> List[str]:
-        """Generate budget-related recommendations"""
-        recommendations = []
-
-        if over_budget:
-            excess = cost - limit
-            recommendations.append(
-                f"[COST] BUDGET EXCEEDED: Estimated cost is ${
-                    excess:.2f} over budget"
-            )
-            recommendations.append("[CHECK] Review resource sizing and consider optimization")
-            recommendations.append(" Consider implementing auto-scaling and scheduled shutdowns")
-
-        utilization = (cost / limit) * 100 if limit > 0 else 0
-
-        if utilization > 80:
-            recommendations.append("[WARN]  HIGH BUDGET UTILIZATION: Consider cost optimization")
-            recommendations.append(
-                "[METRICS] Review most expensive resources for right-sizing opportunities"
-            )
-
-        if cost > 500:
-            recommendations.append(
-                " Consider Reserved Instances or Savings Plans for long-term workloads"
-            )
-
-        return recommendations
-
-    def _get_infracost_version(self) -> Optional[str]:
-        """Get Infracost version"""
-        try:
-            result = subprocess.run(
-                ["infracost", "--version"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
-        return None
-
+    # ---- Diff ---------------------------------------------------------------
     def generate_cost_diff(
-        self,
-        old_terraform: str,
-        new_terraform: str,
-        workspace: str = "default",
+        self, old_tf: str, new_tf: str, workspace: str = _S.DEFAULT_WORKSPACE
     ) -> Dict[str, Any]:
-        """Generate cost difference between two Terraform configurations"""
+        if not (old_tf and new_tf):
+            return {"success": False, "error": "Both old_terraform and new_terraform are required"}
+
         if not self.infracost_available:
-            return {
-                "success": False,
-                "error": "Infracost CLI not available for diff generation",
-                "fallback_available": False,
-            }
+            return {"success": False, "error": "Infracost CLI not available"}
 
-        try:
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_path = Path(temp_dir)
+        env = dict(os.environ)
+        if _S.INFRACOST_API_KEY:
+            env["INFRACOST_API_KEY"] = _S.INFRACOST_API_KEY
 
-                # Create directories for old and new configurations
-                old_dir = temp_path / "old"
-                new_dir = temp_path / "new"
-                old_dir.mkdir()
-                new_dir.mkdir()
+        with _secure_tempdir("ic_old_") as d1, _secure_tempdir("ic_new_") as d2:
+            _write_tf_files(d1, old_tf)
+            _write_tf_files(d2, new_tf)
 
-                # Write configurations
-                (old_dir / "main.tf").write_text(old_terraform, encoding="utf-8", errors="ignore")
-                (new_dir / "main.tf").write_text(new_terraform, encoding="utf-8", errors="ignore")
+            ok1, plan1, err1 = _terraform_plan_json(d1)
+            ok2, plan2, err2 = _terraform_plan_json(d2)
+            if not (ok1 and ok2):
+                return {"success": False, "error": f"Plan failure: old=({err1}), new=({err2})"}
 
-                # Generate diff
-                diff_result = subprocess.run(
-                    [
-                        "infracost",
-                        "diff",
-                        "--path",
-                        str(old_dir),
-                        "--compare-to",
-                        str(new_dir),
-                        "--format",
-                        "json",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
+            cmd = [
+                _S.INFRACOST_BIN,
+                "diff",
+                "--path",
+                plan1,
+                "--path2",
+                plan2,
+                "--format",
+                "json",
+                "--no-color",
+                "--project-name",
+                workspace,
+                "--currency",
+                _S.CURRENCY,
+            ]
+            rc, out, err = _run(cmd, timeout=_S.IC_TIMEOUT, env=env)
+            if rc != 0:
+                return {"success": False, "error": f"infracost diff failed: {err}"}
 
-                if diff_result.returncode != 0:
-                    return {
-                        "success": False,
-                        "error": f"Infracost diff failed: {
-                            diff_result.stderr}",
-                    }
-
-                diff_data = json.loads(diff_result.stdout)
-                return self._process_cost_diff(diff_data, workspace)
-
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Cost diff generation failed: {e}",
-            }
-
-    def _process_cost_diff(self, diff_data: Dict[str, Any], workspace: str) -> Dict[str, Any]:
-        """Process cost diff data"""
-        projects = diff_data.get("projects", [])
-
-        if not projects:
-            return {"success": False, "error": "No cost diff data available"}
-
-        total_monthly_diff = 0.0
-        resource_diffs = []
-
-        for project in projects:
-            diff = project.get("diff", {})
-            total_monthly_diff += float(diff.get("totalMonthlyCost", 0))
-
-            # Process resource differences
-            resources = diff.get("resources", [])
-            for resource in resources:
-                monthly_diff = float(resource.get("monthlyCost", 0))
-                if abs(monthly_diff) > 0.01:  # Only include significant changes
-                    resource_diffs.append(
-                        {
-                            "name": resource.get("name", "unknown"),
-                            "resource_type": resource.get("resourceType", "unknown"),
-                            "monthly_cost_diff": monthly_diff,
-                            "change_type": (
-                                "added"
-                                if monthly_diff > 0
-                                else ("removed" if monthly_diff < 0 else "modified")
-                            ),
-                        }
-                    )
-
-        # Sort by absolute cost impact
-        resource_diffs.sort(key=lambda x: abs(x["monthly_cost_diff"]), reverse=True)
-
+        # Parse diff: use the same parser; monthly cost delta is difference
+        m, y, currency, _ = _parse_infracost_json(out)
+        # When using diff, Infracost may output "totalMonthlyCost" as delta; if not, we just report it as "delta"
         return {
             "success": True,
-            "cost_diff": {
-                "monthly_diff": round(total_monthly_diff, 2),
-                "yearly_diff": round(total_monthly_diff * 12, 2),
-                "percentage_change": self._calculate_percentage_change(diff_data),
-                "currency": "USD",
-            },
-            "resource_changes": resource_diffs[:10],
-            "summary": self._generate_diff_summary(total_monthly_diff, resource_diffs),
-            "workspace": workspace,
-            "generated_at": datetime.now().isoformat(),
+            "currency": currency,
+            "delta_monthly_cost": m,
+            "delta_yearly_cost": y,
+            "generated_at": datetime.utcnow().isoformat() + "Z",
         }
 
-    def _calculate_percentage_change(self, diff_data: Dict[str, Any]) -> Optional[float]:
-        """Calculate percentage change in cost"""
-        try:
-            projects = diff_data.get("projects", [])
-            if projects:
-                diff = projects[0].get("diff", {})
-                total_current = float(diff.get("totalMonthlyCost", 0))
-                total_previous = total_current - float(diff.get("totalMonthlyCost", 0))
-
-                if total_previous > 0:
-                    return round(
-                        ((total_current - total_previous) / total_previous) * 100,
-                        1,
-                    )
-        except (KeyError, ValueError, ZeroDivisionError):
-            pass
-        return None
-
-    def _generate_diff_summary(
-        self, total_diff: float, resource_diffs: List[Dict[str, Any]]
-    ) -> str:
-        """Generate human-readable diff summary"""
-        if abs(total_diff) < 0.01:
-            return "No significant cost changes detected"
-
-        change_type = "increase" if total_diff > 0 else "decrease"
-        abs_diff = abs(total_diff)
-
-        summary = f"Monthly cost {change_type} of ${abs_diff:.2f}"
-
-        if resource_diffs:
-            added_count = len([r for r in resource_diffs if r["change_type"] == "added"])
-            removed_count = len([r for r in resource_diffs if r["change_type"] == "removed"])
-
-            if added_count > 0:
-                summary += f" ({added_count} resources added"
-            if removed_count > 0:
-                summary += (
-                    f", {removed_count} resources removed"
-                    if added_count > 0
-                    else f" ({removed_count} resources removed"
-                )
-            if added_count > 0 or removed_count > 0:
-                summary += ")"
-
-        return summary
-
+    # ---- Budgets ------------------------------------------------------------
     def update_budget(
-        self,
-        workspace: str,
-        monthly_limit: float,
-        alert_thresholds: List[float],
+        self, workspace: str, monthly_limit: float, alert_thresholds: List[float]
     ) -> Dict[str, Any]:
-        """Update budget configuration for a workspace"""
         try:
-            if workspace not in self.budgets.get("workspaces", {}):
-                self.budgets["workspaces"][workspace] = {}
-
-            self.budgets["workspaces"][workspace].update(
-                {
-                    "monthly_limit": monthly_limit,
-                    "alert_thresholds": sorted(alert_thresholds),
-                    "currency": "USD",
-                    "updated_at": datetime.now().isoformat(),
-                }
-            )
-
-            # Save updated budgets
-            with open("budgets.json", "w", encoding="utf-8") as f:
-                json.dump(self.budgets, f, indent=2)
-
+            if monthly_limit < 0:
+                return {"success": False, "error": "monthly_limit must be >= 0"}
+            if not alert_thresholds or any(t <= 0 for t in alert_thresholds):
+                return {"success": False, "error": "alert_thresholds must be positive floats"}
+            thresholds = sorted(alert_thresholds)
+            b = _read_budgets()
+            b[workspace] = {"monthly_limit": float(monthly_limit), "alert_thresholds": thresholds}
+            if not _write_budgets(b):
+                return {"success": False, "error": "Failed to persist budgets"}
             return {
                 "success": True,
-                "message": f"Budget updated for workspace '{workspace}'",
-                "new_config": self.budgets["workspaces"][workspace],
-            }
-
-        except Exception as e:
-            return {"success": False, "error": f"Failed to update budget: {e}"}
-
-    def get_budget_status(self, workspace: str = "default") -> Dict[str, Any]:
-        """Get current budget status for a workspace"""
-        workspace_budget = self.budgets.get("workspaces", {}).get(workspace)
-
-        if not workspace_budget:
-            return {
                 "workspace": workspace,
-                "budget_configured": False,
-                "message": "No budget configured for this workspace",
+                "monthly_limit": monthly_limit,
+                "alert_thresholds": thresholds,
             }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
-        return {
-            "workspace": workspace,
-            "budget_configured": True,
-            "monthly_limit": workspace_budget.get("monthly_limit"),
-            "alert_thresholds": workspace_budget.get("alert_thresholds"),
-            "currency": workspace_budget.get("currency", "USD"),
-            "last_updated": workspace_budget.get("updated_at"),
-        }
+    def get_budget_status(self, workspace: str) -> Dict[str, Any]:
+        b = _read_budgets()
+        ws = b.get(workspace) or {"monthly_limit": 0.0, "alert_thresholds": [0.5, 0.8, 1.0]}
+        return {"success": True, "workspace": workspace, **ws}
 
-    # === APPEND: async + cache + multi-currency (non-destructive) ===
+    # ---- Async v2 (compatible with your routes) -----------------------------
+    async def estimate_cost_async_v2(
+        self, tf_code: str, currency: Optional[str] = None
+    ) -> Dict[str, Any]:
+        currency = (currency or _S.CURRENCY).upper()
 
+        if not tf_code or not tf_code.strip():
+            return {"success": False, "data": {}, "error": "terraform_code required"}
 
-_ic_settings = _IC_Settings()
-_ic_cache = _TTLCache(maxsize=256, ttl=3600)
-_IC_RATES = {
-    ("USD", "USD"): 1.0,
-    ("USD", "INR"): 83.0,
-    ("USD", "EUR"): 0.9,
-    ("EUR", "USD"): 1.11,
-    ("INR", "USD"): 1 / 83.0,
-}
+        if not self.infracost_available:
+            return {"success": False, "data": {}, "error": "Infracost CLI not available"}
 
+        env = dict(os.environ)
+        if _S.INFRACOST_API_KEY:
+            env["INFRACOST_API_KEY"] = _S.INFRACOST_API_KEY
 
-def _ic_convert(amount_usd: float, target: str) -> float:
-    return round(amount_usd * _IC_RATES.get(("USD", target.upper()), 1.0), 2)
+        with _secure_tempdir("ic_v2_") as d:
+            _write_tf_files(d, tf_code)
 
+            ok, plan_json_path, err = _terraform_plan_json(d)
+            if not ok:
+                return {"success": False, "data": {}, "error": err}
 
-async def estimate_cost_async_v2(tf_code: str, currency: str = "USD"):
-    key = f"v2:{hash(tf_code)}:{currency.upper()}"
-    cached = _ic_cache.get(key)
-    if cached:
+            rc, out, err = await _run_async(
+                _S.INFRACOST_BIN,
+                "breakdown",
+                "--path",
+                plan_json_path,
+                "--format",
+                "json",
+                "--no-color",
+                "--project-name",
+                _S.DEFAULT_WORKSPACE,
+                "--currency",
+                currency,
+                cwd=d,
+                timeout=_S.IC_TIMEOUT,
+                env=env,
+            )
+            if rc != 0:
+                return {"success": False, "data": {}, "error": f"infracost breakdown failed: {err}"}
+
+        monthly, yearly, currency, _ = _parse_infracost_json(out)
         return {
             "success": True,
-            "data": {**cached, "cached": True},
+            "data": {
+                "currency": currency,
+                "total_monthly_cost": monthly,
+                "total_yearly_cost": yearly,
+                "total_monthly_cost_usd": (
+                    monthly if currency == "USD" else monthly
+                ),  # leave as-is; caller can convert
+            },
             "error": "",
         }
 
-    try:
-        with _ic_secure_tempdir("ic_v2_") as d:
-            import json as _json
-            import os as _os
 
-            with open(_os.path.join(d, "main.tf"), "w", encoding="utf-8") as f:
-                f.write(tf_code)
-            rc, out, err = await _ic_run_cmd_async(
-                _ic_settings.TF_BIN, "init", "-input=false", cwd=d
-            )
-            if rc != 0:
-                return {
-                    "success": False,
-                    "data": {"stderr": err},
-                    "error": "terraform init failed",
-                }
-            rc, out, err = await _ic_run_cmd_async(
-                _ic_settings.TF_BIN, "plan", "-out=plan.out", cwd=d
-            )
-            if rc != 0:
-                return {
-                    "success": False,
-                    "data": {"stderr": err},
-                    "error": "terraform plan failed",
-                }
-            rc, out, err = await _ic_run_cmd_async(
-                _ic_settings.INFRACOST_BIN,
-                "breakdown",
-                f"--path={d}",
-                "--format=json",
-                cwd=d,
-            )
-            if rc != 0:
-                return {
-                    "success": False,
-                    "data": {"stderr": err},
-                    "error": "infracost breakdown failed",
-                }
-            report = _json.loads(out or "{}")
-            total_usd = float(report.get("totalMonthlyCost", 0.0) or 0.0)
-            total_conv = _ic_convert(total_usd, currency)
-            data = {
-                "currency": currency.upper(),
-                "total_monthly_cost_converted": total_conv,
-                "total_monthly_cost_usd": total_usd,
-                "breakdown": report,
-            }
-            _ic_cache[key] = data
-            return {"success": True, "data": data, "error": ""}
-    except Exception as e:
-        return {"success": False, "data": {}, "error": str(e)}
-
-
-# Global Infracost integration instance
+# Singleton (as in your original)
 infracost_integration = InfracostIntegration()

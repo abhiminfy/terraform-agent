@@ -1,23 +1,42 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
+
 import asyncio
+import os
+from typing import Any, Dict, List
 
 from celery import Celery
 
 from src.app.core.config import Settings
-from src.app.services.infracost_integration import (
-    estimate_cost_async_v2,
-    infracost_integration,
-)
 
+# -----------------------------------------------------------------------------
+# Settings & environment
+# -----------------------------------------------------------------------------
 settings = Settings()
 
-celery_app = Celery(
-    "tfagent",
-    broker=settings.CELERY_BROKER_URL,
-    backend=settings.CELERY_RESULT_BACKEND,
-)
+# Ensure Infracost API key is available to the integration at import time.
+# (_ICSettings in infracost_integration captures env on import.)
+if settings.infracost_api_key and not os.getenv("INFRACOST_API_KEY"):
+    os.environ["INFRACOST_API_KEY"] = settings.infracost_api_key
 
-# Configure Celery
+# Broker/backend: read from env (preferred) with safe Redis defaults.
+BROKER_URL = os.getenv("CELERY_BROKER_URL", os.getenv("REDIS_URL", "redis://redis:6379/1"))
+RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/2")
+
+# Import AFTER setting env so any downstream module sees the key on import.
+# Use the compat shim, which provides a stable API regardless of internal changes.
+from src.app.services.compat import cost_diff as compat_cost_diff
+from src.app.services.compat import (  # noqa: E402
+    estimate_cost_async_v2 as compat_estimate_cost_async_v2,
+)
+from src.app.services.compat import estimate_cost_sync as compat_estimate_cost_sync
+from src.app.services.compat import get_budget_status as compat_get_budget_status
+from src.app.services.compat import update_budget as compat_update_budget
+
+# -----------------------------------------------------------------------------
+# Celery application
+# -----------------------------------------------------------------------------
+celery_app = Celery("tfagent", broker=BROKER_URL, backend=RESULT_BACKEND)
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
@@ -27,125 +46,78 @@ celery_app.conf.update(
 )
 
 
+# -----------------------------------------------------------------------------
+# Tasks
+# -----------------------------------------------------------------------------
 @celery_app.task(name="infracost.estimate")
-def infracost_estimate_task(tf_code: str, currency: str = "USD"):
+def infracost_estimate_task(tf_code: str, currency: str | None = "USD") -> Dict[str, Any]:
     """
-    Celery task for estimating Terraform infrastructure costs.
-
-    Args:
-        tf_code (str): Terraform configuration code
-        currency (str): Target currency for cost estimation (default: USD)
-
-    Returns:
-        dict: Cost estimation result with success status, data, and error info
+    Asynchronous cost estimate via compat shim -> integration.
     """
     try:
-        # Run the async function using asyncio
-        result = asyncio.run(estimate_cost_async_v2(tf_code=tf_code, currency=currency))
+        result = asyncio.run(compat_estimate_cost_async_v2(tf_code=tf_code, currency=currency))
         return result
     except Exception as e:
-        return {
-            "success": False,
-            "data": {},
-            "error": f"Task execution failed: {str(e)}",
-        }
+        return {"success": False, "data": {}, "error": f"Task execution failed: {e}"}
 
 
 @celery_app.task(name="infracost.estimate_sync")
-def infracost_estimate_sync_task(tf_code: str, workspace: str = "default"):
+def infracost_estimate_sync_task(tf_code: str, workspace: str = "default") -> Dict[str, Any]:
     """
-    Celery task for synchronous Terraform cost estimation using the class method.
-
-    Args:
-        tf_code (str): Terraform configuration code
-        workspace (str): Workspace name for budget analysis (default: "default")
-
-    Returns:
-        dict: Cost estimation result from InfracostIntegration class
+    Synchronous cost estimate via compat shim.
     """
     try:
-        result = infracost_integration.generate_cost_estimate(
-            terraform_code=tf_code, workspace=workspace
-        )
-        return result
+        return compat_estimate_cost_sync(tf_code=tf_code, workspace=workspace)
     except Exception as e:
         return {
             "success": False,
-            "error": f"Sync task execution failed: {str(e)}",
+            "error": f"Sync task execution failed: {e}",
             "fallback_available": True,
         }
 
 
 @celery_app.task(name="infracost.cost_diff")
-def infracost_cost_diff_task(old_tf_code: str, new_tf_code: str, workspace: str = "default"):
+def infracost_cost_diff_task(
+    old_tf_code: str, new_tf_code: str, workspace: str = "default"
+) -> Dict[str, Any]:
     """
-    Celery task for generating cost difference between two Terraform configurations.
-
-    Args:
-        old_tf_code (str): Original Terraform configuration
-        new_tf_code (str): New Terraform configuration
-        workspace (str): Workspace name (default: "default")
-
-    Returns:
-        dict: Cost difference analysis result
+    Cost delta between two Terraform configs via compat shim.
     """
     try:
-        result = infracost_integration.generate_cost_diff(
-            old_terraform=old_tf_code, new_terraform=new_tf_code, workspace=workspace
-        )
-        return result
+        return compat_cost_diff(old_tf=old_tf_code, new_tf=new_tf_code, workspace=workspace)
     except Exception as e:
         return {
             "success": False,
-            "error": f"Cost diff task execution failed: {str(e)}",
+            "error": f"Cost diff task execution failed: {e}",
             "fallback_available": False,
         }
 
 
 @celery_app.task(name="infracost.update_budget")
-def infracost_update_budget_task(workspace: str, monthly_limit: float, alert_thresholds: list):
+def infracost_update_budget_task(
+    workspace: str, monthly_limit: float, alert_thresholds: List[float]
+) -> Dict[str, Any]:
     """
-    Celery task for updating budget configuration.
-
-    Args:
-        workspace (str): Workspace name
-        monthly_limit (float): Monthly budget limit
-        alert_thresholds (list): List of alert threshold values
-
-    Returns:
-        dict: Budget update result
+    Update workspace budget settings via compat shim.
     """
     try:
-        result = infracost_integration.update_budget(
-            workspace=workspace,
-            monthly_limit=monthly_limit,
-            alert_thresholds=alert_thresholds,
+        return compat_update_budget(
+            workspace=workspace, monthly_limit=monthly_limit, alert_thresholds=alert_thresholds
         )
-        return result
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Budget update task execution failed: {str(e)}",
-        }
+        return {"success": False, "error": f"Budget update task execution failed: {e}"}
 
 
 @celery_app.task(name="infracost.get_budget_status")
-def infracost_get_budget_status_task(workspace: str = "default"):
+def infracost_get_budget_status_task(workspace: str = "default") -> Dict[str, Any]:
     """
-    Celery task for retrieving budget status.
-
-    Args:
-        workspace (str): Workspace name (default: "default")
-
-    Returns:
-        dict: Current budget status
+    Retrieve current budget status for a workspace via compat shim.
     """
     try:
-        result = infracost_integration.get_budget_status(workspace=workspace)
-        return result
+        return compat_get_budget_status(workspace=workspace)
     except Exception as e:
         return {
             "workspace": workspace,
             "budget_configured": False,
-            "error": f"Failed to get budget status: {str(e)}",
+            "error": f"Failed to get budget status: {e}",
         }

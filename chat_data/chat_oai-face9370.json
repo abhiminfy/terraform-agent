@@ -1,0 +1,27 @@
+{
+  "chat_id": "oai-face9370",
+  "created_at": "2025-09-13T08:06:46.238815",
+  "last_updated": "2025-09-13T08:06:46.267811",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello",
+      "timestamp": "2025-09-13T08:06:46.238831",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "I encountered an error while processing your request. Please try again.",
+      "timestamp": "2025-09-13T08:06:46.267780",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.05
+      }
+    }
+  ],
+  "title": "New Chat",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

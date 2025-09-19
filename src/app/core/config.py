@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from typing import Optional
+
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -8,122 +10,107 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """
     Central app settings.
-    - Loads from .env (UTF-8)
-    - Ignores unknown env keys (prevents crashes if extra vars are present)
-    - Uses explicit aliases so BOTH lower/UPPER env names work
-    - Keeps runtime attribute compatibility via UPPERCASE properties
+
+    - Loads from .env
+    - Case-insensitive env keys via explicit aliases
+    - Extra env vars are ignored (no crashes)
+    - Provides UPPERCASE property aliases for backward-compat
     """
 
-    # Read from .env, respect exact case (we provide aliases), ignore extras
+    # --- Models & APIs ---
+    gemini_api_key: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("GEMINI_API_KEY", "gemini_api_key")
+    )
+    gemini_model: str = Field(
+        default="gemini-1.5-pro", validation_alias=AliasChoices("GEMINI_MODEL", "gemini_model")
+    )
+    hf_model: str = Field(
+        default="distilgpt2", validation_alias=AliasChoices("HF_MODEL", "hf_model")
+    )
+
+    # --- Costs/Infra ---
+    infracost_api_key: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("INFRACOST_API_KEY", "infracost_api_key")
+    )
+
+    # --- GitHub ---
+    github_username: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("GITHUB_USERNAME", "github_username")
+    )
+    github_token: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("GITHUB_TOKEN", "github_token")
+    )
+    github_repo: Optional[str] = Field(
+        default=None, validation_alias=AliasChoices("GITHUB_REPO", "github_repo")
+    )
+
+    # --- Metrics ---
+    prometheus_pushgateway: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("PROMETHEUS_PUSHGATEWAY", "prometheus_pushgateway"),
+    )
+
+    # --- Security & Rate Limiting ---
+    jwt_secret: str = Field(
+        default="your-super-secret-jwt-key-change-this-in-production",
+        validation_alias=AliasChoices("JWT_SECRET", "jwt_secret"),
+    )
+    jwt_algorithm: str = Field(
+        default="HS256",
+        validation_alias=AliasChoices("JWT_ALG", "JWT_ALGORITHM", "jwt_algorithm", "jwt_alg"),
+    )
+    rate_limit_chat: str = Field(
+        default="10/minute", validation_alias=AliasChoices("RATE_LIMIT_CHAT", "rate_limit_chat")
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=True,  # respect case; we rely on aliases below
-        extra="ignore",  # <- prevents "extra inputs are not permitted"
+        extra="ignore",
+        case_sensitive=False,
     )
 
-    # ----- Core app defaults -----
-    APP_VERSION: str = "1.0.0"
-    JWT_SECRET: str = "change-me"
-    JWT_ALG: str = "HS256"
-
-    # ----- Celery/Redis -----
-    CELERY_BROKER_URL: str = "redis://redis:6379/1"
-    CELERY_RESULT_BACKEND: str = "redis://redis:6379/2"
-
-    # ----- CLI binaries / misc -----
-    TF_BIN: str = "terraform"
-    INFRACOST_BIN: str = "infracost"
-    TRUFFLEHOG_BIN: str = "trufflehog"
-    GITHUB_DEFAULT_BRANCH: str = "main"
-
-    # ----- Budgets / tokens -----
-    TOKEN_BUDGET: int = 100_000
-
-    # ----- Prometheus Pushgateway -----
-    prom_pushgateway: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("prom_pushgateway", "PROM_PUSHGATEWAY"),
-    )
-
-    # ----- External creds/repos (accept lower/UPPER env names) -----
-    # Example: `mongo_uri=...` or `MONGO_URI=...`
-    mongo_url: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("mongo_uri", "MONGO_URI"),
-    )
-    infracost_api_key: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("infracost_api_key", "INFRACOST_API_KEY"),
-    )
-    github_username: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("github_username", "GITHUB_USERNAME"),
-    )
-    github_token: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("github_token", "GITHUB_TOKEN"),
-    )
-    github_repo: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("github_repo", "GITHUB_REPO"),
-    )
-
-    # ----- Rate limiting (env-overridable; both lower/UPPER accepted) -----
-    # Matches your routes usage: @_limiter2.limit(_RT.RATE_LIMIT_CHAT)
-    rate_limit_chat: str = Field(
-        default="60/minute",
-        validation_alias=AliasChoices("rate_limit_chat", "RATE_LIMIT_CHAT"),
-    )
-    rate_limit_secure: str = Field(
-        default="30/minute",
-        validation_alias=AliasChoices("rate_limit_secure", "RATE_LIMIT_SECURE"),
-    )
-    rate_limit_tf_to_pr: str = Field(
-        default="10/minute",
-        validation_alias=AliasChoices("rate_limit_tf_to_pr", "RATE_LIMIT_TF_TO_PR"),
-    )
-
-    # =========================
-    # Back-compat runtime properties
-    # (Expose UPPERCASE names your code references at runtime)
-    # =========================
-
-    # Rate limits
+    # ---- UPPERCASE aliases (back-compat) ----
     @property
-    def RATE_LIMIT_CHAT(self) -> str:  # used by routes decorators
-        return self.rate_limit_chat
+    def GEMINI_API_KEY(self) -> Optional[str]:
+        return self.gemini_api_key
 
     @property
-    def RATE_LIMIT_SECURE(self) -> str:
-        return self.rate_limit_secure
+    def GEMINI_MODEL(self) -> str:
+        return self.gemini_model
 
     @property
-    def RATE_LIMIT_TF_TO_PR(self) -> str:
-        return self.rate_limit_tf_to_pr
-
-    # Prometheus Pushgateway
-    @property
-    def PROM_PUSHGATEWAY(self) -> str | None:
-        return self.prom_pushgateway
-
-    # Optional convenience: expose UPPERCASE accessors if any code uses them
-    @property
-    def MONGO_URI(self) -> str | None:
-        return self.mongo_url
+    def HF_MODEL(self) -> str:
+        return self.hf_model
 
     @property
-    def INFRACOST_API_KEY(self) -> str | None:
+    def INFRACOST_API_KEY(self) -> Optional[str]:
         return self.infracost_api_key
 
     @property
-    def GITHUB_USERNAME(self) -> str | None:
+    def GITHUB_USERNAME(self) -> Optional[str]:
         return self.github_username
 
     @property
-    def GITHUB_TOKEN(self) -> str | None:
+    def GITHUB_TOKEN(self) -> Optional[str]:
         return self.github_token
 
     @property
-    def GITHUB_REPO(self) -> str | None:
+    def GITHUB_REPO(self) -> Optional[str]:
         return self.github_repo
+
+    @property
+    def PROMETHEUS_PUSHGATEWAY(self) -> Optional[str]:
+        return self.prometheus_pushgateway
+
+    @property
+    def JWT_SECRET(self) -> str:
+        return self.jwt_secret
+
+    @property
+    def JWT_ALG(self) -> str:
+        return self.jwt_algorithm
+
+    @property
+    def RATE_LIMIT_CHAT(self) -> str:
+        return self.rate_limit_chat

@@ -2,78 +2,62 @@
 # Replace all demo credentials with real values before deploying
 # Use a secrets manager for production secrets
 
-provider "aws" {
-  region = var.region
+resource "aws\_s3\_bucket" "logbucket" {
+bucket = "tf-log-bucket"
 }
 
-
-variable "region" {
-  description = "AWS region"
-  type        = string
-  default     = "us-east-1"
+resource "aws\_s3\_bucket\_versioning" "versioning" {
+bucket = aws\_s3\_bucket.logbucket.id
+versioning\_configuration {
+status = "Enabled"
+}
 }
 
-
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
+resource "aws\_s3\_bucket\_server\_side\_encryption\_configuration" "sse\_kms" {
+bucket = aws\_s3\_bucket.logbucket.id
+rule {
+apply\_server\_side\_encryption\_by\_default {
+sse\_algorithm     = "aws\:kms"
+kms\_master\_key\_id = "alias/aws/s3"
+}
+}
 }
 
-provider "aws" {
-  region = "us-east-1"
+resource "aws\_s3\_bucket\_lifecycle\_configuration" "lifecycle" {
+bucket = aws\_s3\_bucket.logbucket.id
+rule {
+id     = "expire-oldlogs"
+status = "Enabled"
+filter {
+prefix = "oldlogs/"
+}
+expiration {
+days = 30
+}
+}
 }
 
-resource "aws_instance" "example" {
-  ami           = data.aws_ami.amazon_linux_2_latest.id
-  instance_type = "t3.micro"
-
-  # Enable SSM Session Manager access
-  iam_instance_profile = aws_iam_instance_profile.ssm_instance_profile.name
+resource "aws\_s3\_bucket\_public\_access\_block" "block\_public\_access" {
+bucket                  = aws\_s3\_bucket.logbucket.id
+block\_public\_acls       = true
+block\_public\_policy     = true
+ignore\_public\_acls      = true
+restrict\_public\_buckets = true
 }
 
-resource "aws_iam_instance_profile" "ssm_instance_profile" {
-  name = "ssm_instance_profile"
-  role = aws_iam_role.ssm_role.name
+resource "aws\_s3\_bucket\_policy" "deny\_insecure\_put" {
+bucket = aws\_s3\_bucket.logbucket.id
+policy = jsonencode({
+Version = "2012-10-17"
+Statement = \[{
+Sid       = "DenyInsecurePut"
+Effect    = "Deny"
+Principal = "*"
+Action    = "s3\:PutObject"
+Resource  = "arn\:aws\:s3:::\${aws\_s3\_bucket.logbucket.bucket}/*"
+Condition = {
+Bool = { "aws\:SecureTransport" = "false" }
 }
-
-resource "aws_iam_role" "ssm_role" {
-  name = "ssm_role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [
-      {
-        Action = "sts:AssumeRole",
-        Effect = "Allow",
-        Sid    = "",
-        Principal = {
-          Service = "ec2.amazonaws.com"
-        }
-      },
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ssm_policy_attachment" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-  role       = aws_iam_role.ssm_role.name
-}
-
-
-data "aws_ami" "amazon_linux_2_latest" {
-  most_recent = true
-  owners      = ["amazon"]
-
-  filter {
-    name   = "name"
-    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
-  }
-}
-
-output "public_ip" {
-  value = aws_instance.example.public_ip
+}]
+})
 }

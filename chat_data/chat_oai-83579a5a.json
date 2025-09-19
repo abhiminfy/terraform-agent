@@ -1,0 +1,24 @@
+{
+  "chat_id": "oai-83579a5a",
+  "created_at": "2025-09-14T07:06:08.773030",
+  "last_updated": "2025-09-14T07:06:08.788154",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "so in which which clouds you support",
+      "timestamp": "2025-09-14T07:06:08.773054",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "I need more information: Which AWS region would you like to use?\nIs this for development, staging, or production?",
+      "timestamp": "2025-09-14T07:06:08.788118",
+      "metadata": {}
+    }
+  ],
+  "title": "Cloud Setup",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}
