@@ -1,0 +1,27 @@
+{
+  "chat_id": "oai-cf568db3",
+  "created_at": "2025-09-14T07:05:14.574909",
+  "last_updated": "2025-09-14T07:05:14.622788",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello",
+      "timestamp": "2025-09-14T07:05:14.574948",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "I encountered an error while processing your request. Please try again.",
+      "timestamp": "2025-09-14T07:05:14.622528",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.05
+      }
+    }
+  ],
+  "title": "New Chat",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

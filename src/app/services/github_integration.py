@@ -25,7 +25,7 @@ class GitHubIntegration:
         self.github_api_base = "https://api.github.com"
         self.default_branch = os.getenv("GITHUB_DEFAULT_BRANCH", "main")
 
-        # 'token' works for classic PATs; 'Bearer' also works. Keep 'token' for widest compat.  # noqa: E501
+        # 'token' works for classic PATs; 'Bearer' also works. Keep 'token' for widest compat.
         self.headers = {
             "Authorization": f"token {self.github_token}",
             "Accept": "application/vnd.github+json",
@@ -38,9 +38,7 @@ class GitHubIntegration:
         if self.available:
             logger.info(f"GitHub integration initialized for {self.github_repo}")
         else:
-            logger.warning(
-                "GitHub integration not available - missing token or repo configuration"  # noqa: E501
-            )
+            logger.warning("GitHub integration not available - missing token or repo configuration")
 
     # -------- Public API --------
 
@@ -49,14 +47,11 @@ class GitHubIntegration:
         terraform_code: str,
         commit_message: Optional[str] = None,
         branch_name: Optional[str] = None,
-        base_branch: Optional[str] = None,  # <--- NEW: allow override
+        base_branch: Optional[str] = None,  # allow override
     ) -> Dict[str, Any]:
         """Create branch, commit code, and create PR with automated checks"""
         if not self.available:
-            return {
-                "success": False,
-                "error": "GitHub integration not configured",
-            }
+            return {"success": False, "error": "GitHub integration not configured"}
 
         try:
             # Generate branch name if not provided
@@ -66,17 +61,14 @@ class GitHubIntegration:
 
             # Generate commit message if not provided
             if not commit_message:
-                commit_message = commit_message = (
+                commit_message = (
                     f"Update Terraform configuration - {datetime.now():%Y-%m-%d %H:%M:%S}"
                 )
 
             # Determine base branch with safe fallbacks
             base = base_branch or self._get_default_branch() or self.default_branch
             if not base:
-                return {
-                    "success": False,
-                    "error": "Failed to get default branch",
-                }
+                return {"success": False, "error": "Failed to get default branch"}
 
             # Create new branch (treat 'already exists' as success)
             branch_result = self._create_branch(branch_name, base)
@@ -103,8 +95,7 @@ class GitHubIntegration:
                     "commit_sha": commit_result["commit_sha"],
                     "checks_passed": checks_result.get("all_passed", True),
                     "checks_summary": checks_result.get("summary", ""),
-                    "message": f"PR #{
-                        pr_result['pr_number']} created successfully",
+                    "message": f"PR #{pr_result['pr_number']} created successfully",
                 }
             else:
                 return pr_result
@@ -116,14 +107,11 @@ class GitHubIntegration:
     def get_pr_status(self, pr_number: int) -> Dict[str, Any]:
         """Get the status of a pull request"""
         if not self.available:
-            return {
-                "success": False,
-                "error": "GitHub integration not configured",
-            }
+            return {"success": False, "error": "GitHub integration not configured"}
 
         try:
             r = requests.get(
-                f"{self.github_api_base}/repos/{self.github_repo}/pulls/{pr_number}",  # noqa: E501
+                f"{self.github_api_base}/repos/{self.github_repo}/pulls/{pr_number}",
                 headers=self.headers,
                 timeout=30,
             )
@@ -134,8 +122,8 @@ class GitHubIntegration:
                     "pr_number": pr["number"],
                     "title": pr["title"],
                     "state": pr["state"],
-                    "merged": pr["merged"],
-                    "mergeable": pr["mergeable"],
+                    "merged": pr.get("merged", False),
+                    "mergeable": pr.get("mergeable"),
                     "url": pr["html_url"],
                     "created_at": pr["created_at"],
                     "updated_at": pr["updated_at"],
@@ -144,7 +132,7 @@ class GitHubIntegration:
                 }
             return {
                 "success": False,
-                "error": f"Failed to get PR status: {r.status_code} - {r.text}",  # noqa: E501
+                "error": f"Failed to get PR status: {r.status_code} - {r.text}",
             }
         except Exception as e:
             logger.error(f"Error getting PR status: {e}")
@@ -153,10 +141,7 @@ class GitHubIntegration:
     def merge_pr(self, pr_number: int, merge_method: str = "squash") -> Dict[str, Any]:
         """Merge a pull request after validation"""
         if not self.available:
-            return {
-                "success": False,
-                "error": "GitHub integration not configured",
-            }
+            return {"success": False, "error": "GitHub integration not configured"}
 
         try:
             status = self.get_pr_status(pr_number)
@@ -164,25 +149,19 @@ class GitHubIntegration:
                 return status
 
             if status["state"] != "open":
-                return {
-                    "success": False,
-                    "error": f"PR is not open (state: {status['state']})",
-                }
+                return {"success": False, "error": f"PR is not open (state: {status['state']})"}
 
-            if not status["mergeable"]:
-                return {
-                    "success": False,
-                    "error": "PR has merge conflicts and cannot be merged",
-                }
+            if status.get("mergeable") is False:
+                return {"success": False, "error": "PR has merge conflicts and cannot be merged"}
 
             data = {
                 "commit_title": f"Merge PR #{pr_number}",
-                "commit_message": f"Terraform configuration update via PR #{pr_number}",  # noqa: E501
+                "commit_message": f"Terraform configuration update via PR #{pr_number}",
                 "merge_method": merge_method,
             }
 
             r = requests.put(
-                f"{self.github_api_base}/repos/{self.github_repo}/pulls/{pr_number}/merge",  # noqa: E501
+                f"{self.github_api_base}/repos/{self.github_repo}/pulls/{pr_number}/merge",
                 headers=self.headers,
                 json=data,
                 timeout=30,
@@ -192,13 +171,10 @@ class GitHubIntegration:
                 return {
                     "success": True,
                     "merged": True,
-                    "merge_commit_sha": jr["sha"],
+                    "merge_commit_sha": jr.get("sha"),
                     "message": f"PR #{pr_number} merged successfully",
                 }
-            return {
-                "success": False,
-                "error": f"Failed to merge PR: {r.status_code} - {r.text}",
-            }
+            return {"success": False, "error": f"Failed to merge PR: {r.status_code} - {r.text}"}
         except Exception as e:
             logger.error(f"Error merging PR: {e}")
             return {"success": False, "error": f"Failed to merge PR: {e}"}
@@ -206,14 +182,11 @@ class GitHubIntegration:
     def list_open_prs(self) -> Dict[str, Any]:
         """List all open pull requests"""
         if not self.available:
-            return {
-                "success": False,
-                "error": "GitHub integration not configured",
-            }
+            return {"success": False, "error": "GitHub integration not configured"}
 
         try:
             r = requests.get(
-                f"{self.github_api_base}/repos/{self.github_repo}/pulls?state=open",  # noqa: E501
+                f"{self.github_api_base}/repos/{self.github_repo}/pulls?state=open",
                 headers=self.headers,
                 timeout=30,
             )
@@ -228,16 +201,13 @@ class GitHubIntegration:
                         "url": pr["html_url"],
                         "created_at": pr["created_at"],
                         "updated_at": pr["updated_at"],
-                        "mergeable": pr.get("mergeable"),  # list API usually doesn't include this
+                        "mergeable": pr.get("mergeable"),
                         "author": pr["user"]["login"],
                     }
                     for pr in prs_data
                 ]
                 return {"success": True, "prs": prs, "count": len(prs)}
-            return {
-                "success": False,
-                "error": f"Failed to list PRs: {r.status_code} - {r.text}",
-            }
+            return {"success": False, "error": f"Failed to list PRs: {r.status_code} - {r.text}"}
         except Exception as e:
             logger.error(f"Error listing PRs: {e}")
             return {"success": False, "error": f"Failed to list PRs: {e}"}
@@ -245,25 +215,19 @@ class GitHubIntegration:
     def delete_branch(self, branch_name: str) -> Dict[str, Any]:
         """Delete a branch after PR is merged"""
         if not self.available:
-            return {
-                "success": False,
-                "error": "GitHub integration not configured",
-            }
+            return {"success": False, "error": "GitHub integration not configured"}
 
         try:
             r = requests.delete(
-                f"{self.github_api_base}/repos/{self.github_repo}/git/refs/heads/{branch_name}",  # noqa: E501
+                f"{self.github_api_base}/repos/{self.github_repo}/git/refs/heads/{branch_name}",
                 headers=self.headers,
                 timeout=30,
             )
             if r.status_code == 204:
-                return {
-                    "success": True,
-                    "message": f"Branch {branch_name} deleted successfully",
-                }
+                return {"success": True, "message": f"Branch {branch_name} deleted successfully"}
             return {
                 "success": False,
-                "error": f"Failed to delete branch: {r.status_code} - {r.text}",  # noqa: E501
+                "error": f"Failed to delete branch: {r.status_code} - {r.text}",
             }
         except Exception as e:
             logger.error(f"Error deleting branch: {e}")
@@ -290,7 +254,7 @@ class GitHubIntegration:
     def _get_branch_ref(self, branch: str) -> Optional[str]:
         """Return commit SHA for given branch, or None."""
         r = requests.get(
-            f"{self.github_api_base}/repos/{self.github_repo}/git/refs/heads/{branch}",  # noqa: E501
+            f"{self.github_api_base}/repos/{self.github_repo}/git/refs/heads/{branch}",
             headers=self.headers,
             timeout=30,
         )
@@ -305,7 +269,7 @@ class GitHubIntegration:
             if not base_sha:
                 return {
                     "success": False,
-                    "error": f"Failed to get base branch SHA for '{base_branch}'",  # noqa: E501
+                    "error": f"Failed to get base branch SHA for '{base_branch}'",
                 }
 
             data = {"ref": f"refs/heads/{branch_name}", "sha": base_sha}
@@ -316,22 +280,13 @@ class GitHubIntegration:
                 timeout=30,
             )
             if r.status_code == 201:
-                return {
-                    "success": True,
-                    "branch_name": branch_name,
-                    "sha": base_sha,
-                }
-            # If branch already exists, treat as success and continue
-            # committing.
+                return {"success": True, "branch_name": branch_name, "sha": base_sha}
+            # If branch already exists, treat as success and continue committing.
             if r.status_code == 422 and "Reference already exists" in r.text:
-                return {
-                    "success": True,
-                    "branch_name": branch_name,
-                    "sha": base_sha,
-                }
+                return {"success": True, "branch_name": branch_name, "sha": base_sha}
             return {
                 "success": False,
-                "error": f"Failed to create branch: {r.status_code} - {r.text}",  # noqa: E501
+                "error": f"Failed to create branch: {r.status_code} - {r.text}",
             }
         except Exception as e:
             logger.error(f"Error creating branch: {e}")
@@ -351,21 +306,18 @@ class GitHubIntegration:
             # Current ref
             ref_sha = self._get_branch_ref(branch_name)
             if not ref_sha:
-                return {
-                    "success": False,
-                    "error": "Failed to get branch reference",
-                }
+                return {"success": False, "error": "Failed to get branch reference"}
 
             # Current tree
             r = requests.get(
-                f"{self.github_api_base}/repos/{self.github_repo}/git/commits/{ref_sha}",  # noqa: E501
+                f"{self.github_api_base}/repos/{self.github_repo}/git/commits/{ref_sha}",
                 headers=self.headers,
                 timeout=30,
             )
             if r.status_code != 200:
                 return {
                     "success": False,
-                    "error": f"Failed to get current commit: {r.status_code} - {r.text}",  # noqa: E501
+                    "error": f"Failed to get current commit: {r.status_code} - {r.text}",
                 }
             base_tree = r.json()["tree"]["sha"]
 
@@ -376,12 +328,7 @@ class GitHubIntegration:
                 if not blob.get("success"):
                     return blob
                 tree_items.append(
-                    {
-                        "path": filename,
-                        "mode": "100644",
-                        "type": "blob",
-                        "sha": blob["sha"],
-                    }
+                    {"path": filename, "mode": "100644", "type": "blob", "sha": blob["sha"]}
                 )
 
             # Create new tree
@@ -394,7 +341,7 @@ class GitHubIntegration:
             if r.status_code != 201:
                 return {
                     "success": False,
-                    "error": f"Failed to create tree: {r.status_code} - {r.text}",  # noqa: E501
+                    "error": f"Failed to create tree: {r.status_code} - {r.text}",
                 }
             new_tree_sha = r.json()["sha"]
 
@@ -402,23 +349,19 @@ class GitHubIntegration:
             r = requests.post(
                 f"{self.github_api_base}/repos/{self.github_repo}/git/commits",
                 headers=self.headers,
-                json={
-                    "message": commit_message,
-                    "tree": new_tree_sha,
-                    "parents": [ref_sha],
-                },
+                json={"message": commit_message, "tree": new_tree_sha, "parents": [ref_sha]},
                 timeout=30,
             )
             if r.status_code != 201:
                 return {
                     "success": False,
-                    "error": f"Failed to create commit: {r.status_code} - {r.text}",  # noqa: E501
+                    "error": f"Failed to create commit: {r.status_code} - {r.text}",
                 }
             new_commit_sha = r.json()["sha"]
 
             # Update reference
             r = requests.patch(
-                f"{self.github_api_base}/repos/{self.github_repo}/git/refs/heads/{branch_name}",  # noqa: E501
+                f"{self.github_api_base}/repos/{self.github_repo}/git/refs/heads/{branch_name}",
                 headers=self.headers,
                 json={"sha": new_commit_sha, "force": False},
                 timeout=30,
@@ -431,7 +374,7 @@ class GitHubIntegration:
                 }
             return {
                 "success": False,
-                "error": f"Failed to update branch reference: {r.status_code} - {r.text}",  # noqa: E501
+                "error": f"Failed to update branch reference: {r.status_code} - {r.text}",
             }
         except Exception as e:
             logger.error(f"Error committing to branch: {e}")
@@ -445,21 +388,18 @@ class GitHubIntegration:
             # Current ref
             ref_sha = self._get_branch_ref(branch_name)
             if not ref_sha:
-                return {
-                    "success": False,
-                    "error": "Failed to get branch reference",
-                }
+                return {"success": False, "error": "Failed to get branch reference"}
 
             # Current tree
             r = requests.get(
-                f"{self.github_api_base}/repos/{self.github_repo}/git/commits/{ref_sha}",  # noqa: E501
+                f"{self.github_api_base}/repos/{self.github_repo}/git/commits/{ref_sha}",
                 headers=self.headers,
                 timeout=30,
             )
             if r.status_code != 200:
                 return {
                     "success": False,
-                    "error": f"Failed to get current commit: {r.status_code} - {r.text}",  # noqa: E501
+                    "error": f"Failed to get current commit: {r.status_code} - {r.text}",
                 }
             base_tree = r.json()["tree"]["sha"]
 
@@ -470,12 +410,7 @@ class GitHubIntegration:
                 if not blob.get("success"):
                     return blob
                 tree_items.append(
-                    {
-                        "path": filename,
-                        "mode": "100644",
-                        "type": "blob",
-                        "sha": blob["sha"],
-                    }
+                    {"path": filename, "mode": "100644", "type": "blob", "sha": blob["sha"]}
                 )
 
             # Create new tree
@@ -488,7 +423,7 @@ class GitHubIntegration:
             if r.status_code != 201:
                 return {
                     "success": False,
-                    "error": f"Failed to create tree: {r.status_code} - {r.text}",  # noqa: E501
+                    "error": f"Failed to create tree: {r.status_code} - {r.text}",
                 }
             new_tree_sha = r.json()["sha"]
 
@@ -496,23 +431,19 @@ class GitHubIntegration:
             r = requests.post(
                 f"{self.github_api_base}/repos/{self.github_repo}/git/commits",
                 headers=self.headers,
-                json={
-                    "message": commit_message,
-                    "tree": new_tree_sha,
-                    "parents": [ref_sha],
-                },
+                json={"message": commit_message, "tree": new_tree_sha, "parents": [ref_sha]},
                 timeout=30,
             )
             if r.status_code != 201:
                 return {
                     "success": False,
-                    "error": f"Failed to create commit: {r.status_code} - {r.text}",  # noqa: E501
+                    "error": f"Failed to create commit: {r.status_code} - {r.text}",
                 }
             new_commit_sha = r.json()["sha"]
 
             # Update reference
             r = requests.patch(
-                f"{self.github_api_base}/repos/{self.github_repo}/git/refs/heads/{branch_name}",  # noqa: E501
+                f"{self.github_api_base}/repos/{self.github_repo}/git/refs/heads/{branch_name}",
                 headers=self.headers,
                 json={"sha": new_commit_sha, "force": False},
                 timeout=30,
@@ -525,7 +456,7 @@ class GitHubIntegration:
                 }
             return {
                 "success": False,
-                "error": f"Failed to update branch reference: {r.status_code} - {r.text}",  # noqa: E501
+                "error": f"Failed to update branch reference: {r.status_code} - {r.text}",
             }
         except Exception as e:
             logger.error(f"Error committing multiple files: {e}")
@@ -537,31 +468,21 @@ class GitHubIntegration:
             r = requests.post(
                 f"{self.github_api_base}/repos/{self.github_repo}/git/blobs",
                 headers=self.headers,
-                json={
-                    "content": base64.b64encode(content.encode()).decode(),
-                    "encoding": "base64",
-                },
+                json={"content": base64.b64encode(content.encode()).decode(), "encoding": "base64"},
                 timeout=30,
             )
             if r.status_code == 201:
                 return {"success": True, "sha": r.json()["sha"]}
-            return {
-                "success": False,
-                "error": f"Failed to create blob: {r.status_code} - {r.text}",
-            }
+            return {"success": False, "error": f"Failed to create blob: {r.status_code} - {r.text}"}
         except Exception as e:
             return {"success": False, "error": f"Blob creation failed: {e}"}
 
     def _run_pr_checks(self, terraform_code: str) -> Dict[str, Any]:
-        """Policy/cost/validation checks (best-effort; won’t block PR creation)"""  # noqa: E501
+        """Policy/cost/validation checks (best-effort; won’t block PR creation)"""
         checks_result = {
             "all_passed": True,
-            "policy_check": {"passed": True, "violations": []},
-            "cost_check": {
-                "passed": True,
-                "estimated_cost": 0,
-                "cost_limit": 0,
-            },
+            "policy_check": {"passed": True, "violations": [], "summary": {}},
+            "cost_check": {"passed": True, "estimated_cost": 0, "cost_limit": 0},
             "validation_check": {"passed": True, "errors": [], "output": ""},
             "summary": "",
         }
@@ -586,7 +507,7 @@ class GitHubIntegration:
             if infracost_integration.infracost_available:
                 cost = infracost_integration.generate_cost_estimate(terraform_code, "default")
                 if cost.get("success"):
-                    est = cost.get("cost_estimate", {}).get("monthly_cost", 0)
+                    est = float(cost.get("cost_estimate", {}).get("monthly_cost", 0) or 0)
                     limit = 500.0
                     checks_result["cost_check"] = {
                         "passed": est <= limit,
@@ -597,14 +518,28 @@ class GitHubIntegration:
                     if not checks_result["cost_check"]["passed"]:
                         checks_result["all_passed"] = False
 
-            # Validation
-            valid = terraform_validator.validate_terraform_syntax(terraform_code)
+            # Validation (handle ToolResult or dict)
+            vres = terraform_validator.validate_terraform_syntax(terraform_code)
+            if getattr(vres, "success", None) is True and getattr(vres, "data", None):
+                vdata = vres.data
+                passed = bool(vdata.get("valid", False))
+                errors = vdata.get("errors", [])
+                output = vdata.get("output", "")
+            elif isinstance(vres, dict):
+                passed = vres.get("valid", False)
+                errors = vres.get("errors", [])
+                output = vres.get("output", "")
+            else:
+                passed = False
+                errors = [getattr(vres, "error", "Validation failed")]
+                output = getattr(vres, "data", "")
+
             checks_result["validation_check"] = {
-                "passed": valid.get("valid", False),
-                "errors": valid.get("errors", []),
-                "output": valid.get("output", ""),
+                "passed": passed,
+                "errors": errors,
+                "output": output,
             }
-            if not checks_result["validation_check"]["passed"]:
+            if not passed:
                 checks_result["all_passed"] = False
 
             # Summary
@@ -612,13 +547,17 @@ class GitHubIntegration:
             parts.append(
                 "[OK] Policy checks passed"
                 if checks_result["policy_check"]["passed"]
-                else f"[ERROR] Policy checks failed ({len(checks_result['policy_check']['violations'])} violations)"  # noqa: E501
+                else f"[ERROR] Policy checks failed ({len(checks_result['policy_check']['violations'])} violations)"
             )
-            parts.append(
-                f"[OK] Cost check passed (${checks_result['cost_check']['estimated_cost']:.2f}/month)"  # noqa: E501
-                if checks_result["cost_check"]["passed"]
-                else f"[WARN] Cost check failed (${checks_result['cost_check']['estimated_cost']:.2f}/month > ${checks_result['cost_check']['cost_limit']:.2f}/month)"  # noqa: E501
-            )
+            if checks_result["cost_check"]["passed"]:
+                parts.append(
+                    f"[OK] Cost check passed (${checks_result['cost_check']['estimated_cost']:.2f}/month)"
+                )
+            else:
+                parts.append(
+                    f"[WARN] Cost check failed (${checks_result['cost_check']['estimated_cost']:.2f}/month > "
+                    f"${checks_result['cost_check']['cost_limit']:.2f}/month)"
+                )
             parts.append(
                 "[OK] Terraform validation passed"
                 if checks_result["validation_check"]["passed"]
@@ -662,10 +601,7 @@ class GitHubIntegration:
                     "pr_url": pr["html_url"],
                     "pr_id": pr["id"],
                 }
-            return {
-                "success": False,
-                "error": f"Failed to create PR: {r.status_code} - {r.text}",
-            }
+            return {"success": False, "error": f"Failed to create PR: {r.status_code} - {r.text}"}
         except Exception as e:
             logger.error(f"Error creating pull request: {e}")
             return {"success": False, "error": f"PR creation failed: {e}"}
@@ -675,7 +611,7 @@ class GitHubIntegration:
         parts: List[str] = [
             "## Terraform Configuration Update",
             "",
-            "This PR contains automatically generated Terraform configuration.",  # noqa: E501
+            "This PR contains automatically generated Terraform configuration.",
             "",
             "### [CHECK] Automated Checks",
             "",
@@ -692,30 +628,23 @@ class GitHubIntegration:
             parts.extend(["", "**Policy Violations:**"])
             for v in policy["violations"][:5]:
                 parts.append(
-                    f"- [{v.get('severity', 'UNKNOWN')}] {v.get('message', 'Unknown violation')}"  # noqa: E501
+                    f"- [{v.get('severity', 'UNKNOWN')}] {v.get('message', 'Unknown violation')}"
                 )
             if len(policy["violations"]) > 5:
-                parts.append(
-                    f"- ... and {len(policy['violations']) - 5} more violations"  # noqa: E501
-                )
+                parts.append(f"- ... and {len(policy['violations']) - 5} more violations")
 
         parts.append("")
 
         # Cost
         cost = checks_result.get("cost_check", {})
         if cost.get("passed"):
-            parts.append(
-                f"[OK] **Cost Estimation**: ${cost.get('estimated_cost', 0):.2f}/month (within budget)"  # noqa: E501
-            )
+            est = float(cost.get("estimated_cost", 0) or 0)
+            parts.append(f"[OK] **Cost Estimation**: ${est:.2f}/month (within budget)")
         else:
+            est = float(cost.get("estimated_cost", 0) or 0)
+            limit = float(cost.get("cost_limit", 0) or 0)
             parts.append(
-                f"[WARN] **Cost Estimation**: ${
-                    cost.get(
-                        'estimated_cost',
-                        0):.2f}/month (exceeds ${
-                    cost.get(
-                        'cost_limit',
-                        0):.2f}/month budget)"
+                f"[WARN] **Cost Estimation**: ${est:.2f}/month (exceeds ${limit:.2f}/month budget)"
             )
 
         parts.append("")
@@ -728,13 +657,7 @@ class GitHubIntegration:
             else "[ERROR] **Terraform Validation**: Failed"
         )
         if not val.get("passed") and val.get("errors"):
-            parts.extend(
-                [
-                    "",
-                    "**Validation Errors:**",
-                    f"```\n{val.get('errors')}\n```",
-                ]
-            )
+            parts.extend(["", "**Validation Errors:**", f"```\n{val.get('errors')}\n```"])
 
         parts.extend(
             [
@@ -757,13 +680,13 @@ class GitHubIntegration:
                 (
                     "- [OK] All automated checks passed - ready for deployment"
                     if checks_result.get("all_passed")
-                    else "- [ERROR] Some checks failed - review required before deployment"  # noqa: E501
+                    else "- [ERROR] Some checks failed - review required before deployment"
                 ),
                 "- Run `terraform plan` to review changes",
                 "- Run `terraform apply` to deploy infrastructure",
                 "",
                 "---",
-                "*This PR was created automatically by the Terraform AI Agent*",  # noqa: E501
+                "*This PR was created automatically by the Terraform AI Agent*",
             ]
         )
         return "\n".join(parts)
@@ -823,7 +746,7 @@ budgets.json
         parts: List[str] = [
             "# Terraform Infrastructure",
             "",
-            "This repository contains Terraform configuration for AWS infrastructure.",  # noqa: E501
+            "This repository contains Terraform configuration for AWS infrastructure.",
             "",
             "## Resources",
             "",
@@ -864,12 +787,12 @@ budgets.json
                 "",
                 "- Terraform >= 1.0",
                 "- AWS CLI configured with appropriate credentials",
-                "- Required AWS IAM permissions for the resources being created",  # noqa: E501
+                "- Required AWS IAM permissions for the resources being created",
                 "",
                 "## Security",
                 "",
-                "This configuration has been validated against security best practices.",  # noqa: E501
-                "Please review all security group rules and access controls before deployment.",  # noqa: E501
+                "This configuration has been validated against security best practices.",
+                "Please review all security group rules and access controls before deployment.",
                 "",
                 "---",
                 "*Generated by Terraform AI Agent*",
@@ -911,11 +834,7 @@ async def trufflehog_scan_ref(ref: str = None):
         "--json",
     )
     if rc != 0:
-        return {
-            "success": False,
-            "data": {"stderr": err},
-            "error": "truffleHog failed",
-        }
+        return {"success": False, "data": {"stderr": err}, "error": "truffleHog failed"}
     findings = [_gh_json.loads(line) for line in out.splitlines() if line.strip().startswith("{")]
     return {"success": True, "data": {"findings": findings}, "error": ""}
 

@@ -1,0 +1,27 @@
+{
+  "chat_id": "oai-b6fd9fbe",
+  "created_at": "2025-09-14T07:05:41.859531",
+  "last_updated": "2025-09-14T07:05:41.884097",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "whats IaC",
+      "timestamp": "2025-09-14T07:05:41.859545",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "I encountered an error while processing your request. Please try again.",
+      "timestamp": "2025-09-14T07:05:41.884073",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.05
+      }
+    }
+  ],
+  "title": "Whats IaC",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

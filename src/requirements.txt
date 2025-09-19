@@ -49,3 +49,5 @@ black>=24.4
 isort>=5.13
 flake8>=7.0
 mypy>=1.10
+
+ strands-agents==1.9.0

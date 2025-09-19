@@ -1,3 +1,4 @@
+# routes.py
 import asyncio
 import json
 import logging
@@ -6,12 +7,12 @@ import re
 import time
 import traceback
 import uuid
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
-import google.generativeai as genai
 import httpx as _rt_httpx
 import jwt as _rt_jwt
 from dotenv import load_dotenv
@@ -23,25 +24,30 @@ from pydantic import BaseModel
 from slowapi import Limiter as _rt_Limiter
 from slowapi.util import get_remote_address as _rt_get_remote_address
 
+from app.services import policy_engine
 from src.app.core.config import Settings as _RT_Settings
 from src.app.services.background import celery_app as _rt_celery
+
+# REMOVED: from src.app.services.infracost_integration import estimate_cost_async_v2 as _rt_cost_v2
+from src.app.services.compat import validate_terraform_code_ast as _rt_validate_ast
 from src.app.services.github_integration import (
     enable_auto_apply_action as _rt_enable_actions,
 )
-from src.app.services.github_integration import (  # noqa: E501
-    trufflehog_scan_ref as _rt_truffle,
+from src.app.services.github_integration import trufflehog_scan_ref as _rt_truffle
+from src.app.services.helpers import infracost_breakdown_hcl as _infracost_breakdown_hcl
+from src.app.services.helpers import read_main_tf as _read_last_terraform_from_disk
+from src.app.services.helpers import save_main_tf as _save_terraform_to_disk
+
+# NEW: Orchestrator + helpers
+from src.app.services.orchestrator import (
+    AgentReply,
+    ReplyType,
+    run_pipeline,
+    stream_pipeline,
 )
-from src.app.services.infracost_integration import estimate_cost_async_v2 as _rt_cost_v2
-from src.app.services.policy_engine import (
-    validate_terraform_code_ast as _rt_validate_ast,
-)
-from src.app.services.strands_agent import (
-    TerraformAgent,
-)
+from src.app.services.strands_agent import TerraformAgent
 from src.app.services.strands_agent import chat_secure as _rt_chat_secure
-from src.app.services.strands_agent import (  # noqa: E501
-    generate_tf_unit_tests as _rt_ai_tests,
-)
+from src.app.services.strands_agent import generate_tf_unit_tests as _rt_ai_tests
 from src.app.utils.utils import run_cmd_async as _rt_run_cmd_async
 from src.app.utils.utils import sanitize_user_text as _rt_sanitize
 from src.app.utils.utils import secure_tempdir as _rt_secure_tempdir
@@ -57,11 +63,30 @@ except Exception:
 from src.app.core.metrics import metrics
 from src.app.services.github_integration import github_integration
 from src.app.services.infracost_integration import infracost_integration
-from src.app.services.policy_engine import policy_engine
+
+# Add this alias for backward compatibility
+_rt_cost_v2 = infracost_integration.estimate_cost_async_v2
+
+# --- ADDED: no-op decorator shim so AttributeError won't crash imports ---
+if not hasattr(metrics, "track_request"):
+
+    def _noop_track_request(_method: str, _path: str):
+        def _decorator(func):
+            return func
+
+        return _decorator
+
+    metrics.track_request = _noop_track_request  # type: ignore[attr-defined]
+# -------------------------------------------------------------------------
+
+# Add this alias for backward compatibility
+_rt_cost_v2 = infracost_integration.estimate_cost_async_v2
+
+# ... rest of the code remains the same ...
 
 
 # ============================================================
-# NEW: OpenAI wrapper + Infra formatter
+# OpenAI wrapper (kept for WebUI compatibility)
 # ============================================================
 def openai_chat_response(content: str, model: str = "terraform-agent") -> dict:
     """Return content in the exact shape Open WebUI expects."""
@@ -77,42 +102,8 @@ def openai_chat_response(content: str, model: str = "terraform-agent") -> dict:
                 "finish_reason": "stop",
             }
         ],
-        "usage": {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-        },
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     }
-
-
-def format_infra_reply(status: str, code: Optional[str], diagnostics: Optional[str]) -> str:
-    """
-    Produce one Markdown message that includes:
-      - header
-      - diagnostics (if any)
-      - HCL code block (if any)
-      - brief 'what next'
-    This way Open WebUI shows everything in a single assistant bubble.
-    """
-    header = "✅ Terraform code generated successfully."
-    if status == "validation_failed":
-        header = "⚠️ Generated Terraform code has validation errors — fixes needed:"  # noqa: E501
-
-    parts = [header]
-
-    if diagnostics:
-        parts.append("### Diagnostics\n```\n" + diagnostics.strip() + "\n```")
-
-    if code:
-        parts.append("### Terraform (HCL)\n```hcl\n" + code.strip() + "\n```")
-
-    parts.append(
-        "### What I did next\n- Saved to `main.tf`\n- You can run `terraform init && terraform validate`"  # noqa: E501
-    )
-    return "\n\n".join(parts).strip()
-
-
-# ============================================================
 
 
 # ---------------------------
@@ -141,7 +132,6 @@ async def _attach_verification(user_msg: str, payload: dict) -> dict:
     """Add verification fields without changing your response shape."""
     try:
         draft = payload.get("response", "") if isinstance(payload, dict) else ""
-        # verify_answer is synchronous
         try:
             v = verify_answer(user_msg, draft, min_citations=1)
         except Exception as ve:
@@ -169,104 +159,15 @@ async def _attach_verification(user_msg: str, payload: dict) -> dict:
         return payload
 
 
-# ---------- NEW: Fallback helpers ----------
-def _is_probably_code_request(text: str) -> bool:
-    t = (text or "").lower()
-    # quick heuristics that cover most IaC asks
-    keywords = [
-        "terraform",
-        "hcl",
-        "resource",
-        "module",
-        "generate",
-        "create",
-        "aws_",
-        "azurerm_",
-        "google_",
-        "s3",
-        "vpc",
-        "ec2",
-        "bucket",
-    ]
-    return any(k in t for k in keywords)
-
-
-def _extract_hcl_from_text(t: str) -> str:
-    """Try to pull HCL from a Markdown code fence first; else return the text as-is."""  # noqa: E501
-    if not isinstance(t, str):
-        return ""
-    m = re.search(r"```(?:hcl|terraform)?\s*([\s\S]*?)```", t, re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-    return t.strip()
-
-
-async def _gemini_fallback(prompt: str, code_preferred: bool = False) -> str:
-    """
-    Use Gemini directly as a safety net if the agent returns clarify/empty.
-    - If code_preferred=True, request HCL only.
-    """
-    if not os.getenv("GEMINI_API_KEY"):
-        return ""
-
-    model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-    try:
-        model = genai.GenerativeModel(model_name)
-
-        if code_preferred:
-            sys_prompt = (
-                "You are a Terraform assistant. "
-                "Return ONLY valid Terraform HCL that a user can paste into .tf files. "  # noqa: E501
-                "No commentary, no explanations, no backticks."
-            )
-            full = f"{sys_prompt}\n\nUser request:\n{prompt}"
-        else:
-            sys_prompt = (
-                "You are a concise cloud/IaC assistant. "
-                "Answer clearly without asking clarifying questions unless truly required."  # noqa: E501
-            )
-            full = f"{sys_prompt}\n\nUser request:\n{prompt}"
-
-        # google-generativeai is sync; run in a thread to avoid blocking the
-        # event loop
-        def _run():
-            resp = model.generate_content(full)
-            return getattr(resp, "text", "") or ""
-
-        text = await asyncio.to_thread(_run)
-        return (text or "").strip()
-    except Exception as e:
-        logger.warning(f"Gemini fallback failed: {e}")
-        return ""
-
-
-def _looks_like_empty_or_error_text(text: str) -> bool:
-    if not text or not text.strip():
-        return True
-    t = text.strip().lower()
-    # Common noisy lines from agent validation path
-    return (
-        t.startswith("generated terraform code has validation errors")
-        or t == "i need more information to help you better."
-        or t == "i need more information"
-    )
-
-
 # ---------------------------
 # Init / Env / Logging
 # ---------------------------
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
 load_dotenv()
-api_key = os.getenv("GEMINI_API_KEY")
-if api_key:
-    genai.configure(api_key=api_key)
-else:
-    logger.warning("GEMINI_API_KEY not found; some features may be unavailable")
 
 ALLOWED_ORIGINS = (
     os.getenv("ALLOWED_ORIGINS", "*").split(",") if os.getenv("ALLOWED_ORIGINS") != "*" else ["*"]
@@ -309,11 +210,22 @@ try:
         router.middleware("http")(add_request_id_middleware)
         logger.info("APIRouter.middleware registered")
     else:
-        logger.info(
-            "APIRouter.middleware not available; app-level will handle request IDs"  # noqa: E501
-        )
+        logger.info("APIRouter.middleware not available; app-level will handle request IDs")
 except Exception as _e:
     logger.warning("Router middleware registration skipped: %s", str(_e))
+
+
+# ---------------------------
+# Env helper (context manager)
+# ---------------------------
+@contextmanager
+def _clear_tf_cli_args_env():
+    old = os.environ.pop("TF_CLI_ARGS", None)
+    try:
+        yield
+    finally:
+        if old is not None:
+            os.environ["TF_CLI_ARGS"] = old
 
 
 # ---------------------------
@@ -337,6 +249,7 @@ class ChatHistoryRequest(BaseModel):
 class ValidateRequest(BaseModel):
     terraform_code: str
     run_policy_checks: Optional[bool] = True
+    usage_yaml: Optional[str] = None
 
 
 class BudgetUpdateRequest(BaseModel):
@@ -353,7 +266,7 @@ class CreatePRRequest(BaseModel):
 
 class MergePRRequest(BaseModel):
     pr_number: int
-    merge_method: Optional[str] = "squash"  # squash, merge, rebase
+    merge_method: Optional[str] = "squash"
 
 
 class ChatSettingsRequest(BaseModel):
@@ -361,6 +274,25 @@ class ChatSettingsRequest(BaseModel):
     region: Optional[str] = None
     environment: Optional[str] = None
     budget: Optional[float] = None
+
+
+# === Long-input handling
+MAX_INPUT_CHARS = int(os.getenv("MAX_INPUT_CHARS", "200000"))
+CHAT_DATA_DIR = Path(os.getenv("CHAT_DATA_DIR", "chat_data"))
+
+
+def spill_if_too_long(text: str) -> tuple[str, str | None]:
+    if not isinstance(text, str):
+        return "", None
+    if len(text) <= MAX_INPUT_CHARS:
+        return text, None
+    CHAT_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    p = CHAT_DATA_DIR / f"incoming_{uuid.uuid4().hex}.txt"
+    p.write_text(text, encoding="utf-8")
+    return (
+        f"Load and process the file at {p}. Do not print the raw contents; summarize actions and results instead.",
+        str(p),
+    )
 
 
 # ---------------------------
@@ -378,18 +310,9 @@ def ping():
 async def test_endpoint():
     try:
         if terraform_agent is None:
-            return {
-                "status": "error",
-                "agent_initialized": False,
-                "gemini_api_configured": bool(os.getenv("GEMINI_API_KEY")),
-                "error": "Agent not initialized",
-            }
+            return {"status": "error", "agent_initialized": False, "error": "Agent not initialized"}
         health_status = await terraform_agent.health_check()
-        return {
-            "status": "ok",
-            "message": "Backend is healthy",
-            **health_status,
-        }
+        return {"status": "ok", "message": "Backend is healthy", **health_status}
     except Exception as e:
         logger.error("Health check failed: %s", str(e))
         raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
@@ -408,7 +331,6 @@ async def detailed_health_check():
         health_status.update(
             {
                 "environment_vars": {
-                    "GEMINI_API_KEY": bool(os.getenv("GEMINI_API_KEY")),
                     "GITHUB_TOKEN": bool(os.getenv("GITHUB_TOKEN")),
                     "GITHUB_REPO": bool(os.getenv("GITHUB_REPO")),
                     "INFRACOST_API_KEY": bool(os.getenv("INFRACOST_API_KEY")),
@@ -424,7 +346,7 @@ async def detailed_health_check():
                 "components": {
                     "metrics_enabled": True,
                     "policy_engine_enabled": True,
-                    "infracost_integration": infracost_integration.infracost_available,  # noqa: E501
+                    "infracost_integration": infracost_integration.infracost_available,
                     "policy_scanners": policy_engine.enabled_scanners,
                     "github_integration": github_integration.available,
                 },
@@ -434,15 +356,11 @@ async def detailed_health_check():
         return health_status
     except Exception as e:
         logger.error("Detailed health check failed: %s", str(e))
-        return {
-            "status": "unhealthy",
-            "error": str(e),
-            "agent_initialized": False,
-        }
+        return {"status": "unhealthy", "error": str(e), "agent_initialized": False}
 
 
 # ---------------------------
-# Chat
+# Chat (via orchestrator)
 # ---------------------------
 @router.post("/chat")
 async def chat_with_ai(req: ChatMessageRequest):
@@ -451,27 +369,23 @@ async def chat_with_ai(req: ChatMessageRequest):
 
     if terraform_agent is None:
         raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "Agent not initialized",
-                "request_id": request_id,
-            },
+            status_code=500, detail={"error": "Agent not initialized", "request_id": request_id}
         )
 
     try:
         if not req.user_message or not req.user_message.strip():
-            payload = {
-                "error": "Empty message not allowed",
-                "request_id": request_id,
-            }
+            payload = {"error": "Empty message not allowed", "request_id": request_id}
             payload = await _attach_verification(req.user_message, payload)
             raise HTTPException(status_code=400, detail=payload)
 
+        # (Optional) spill very long inputs to disk
+        user_msg_raw = req.user_message.strip()
+        user_msg_slim, _spilled = spill_if_too_long(user_msg_raw)
+
         metrics.record_chat_message("user", "terraform")
         try:
-            # Properly await the async method call
-            result = await asyncio.wait_for(
-                terraform_agent.process_message(req.user_message.strip(), req.chat_id),
+            reply: AgentReply = await asyncio.wait_for(
+                run_pipeline(user_msg_slim, req.chat_id, terraform_agent),
                 timeout=180.0,
             )
         except asyncio.TimeoutError:
@@ -479,175 +393,12 @@ async def chat_with_ai(req: ChatMessageRequest):
             payload = await _attach_verification(req.user_message, payload)
             raise HTTPException(status_code=408, detail=payload)
 
-        # ---------- NEW: intelligent fallback ----------
-        rtype = (result or {}).get("type", "") if isinstance(result, dict) else ""
-        content = (result or {}).get("content", "") if isinstance(result, dict) else ""
-        tf_code = ""
-        if isinstance(result, dict):
-            tf_code = (
-                result.get("terraform_code")
-                or result.get("artifacts", {}).get("formatted_code")
-                or ""
-            ).strip()
+        metrics.record_chat_message("assistant", reply.type.value)
 
-        need_fallback = (
-            result is None
-            or rtype == "clarify"
-            or _looks_like_empty_or_error_text(content)
-            or (rtype == "terraform" and not tf_code)
-        )
-
-        if need_fallback:
-            code_pref = _is_probably_code_request(req.user_message)
-            fb = await _gemini_fallback(req.user_message, code_preferred=code_pref)
-            if fb:
-                if code_pref:
-                    # Treat as successful terraform response
-                    tf = _extract_hcl_from_text(fb)
-                    return {
-                        "status": "success",
-                        "type": "terraform",
-                        "response": "Terraform code generated.",
-                        "terraform_code": tf,
-                        "thinking": "",
-                        "tool_status": {},
-                        "chat_id": (
-                            result.get("chat_id", req.chat_id)
-                            if isinstance(result, dict)
-                            else req.chat_id
-                        ),
-                        "confidence_score": 0.7,
-                        "request_id": request_id,
-                        "artifacts": {
-                            "formatted_code": tf,
-                            "validation_output": "",
-                            "diff": "",
-                        },
-                        "analysis": {
-                            "security_findings": [],
-                            "best_practices": [],
-                            "blast_radius_warnings": [],
-                        },
-                    }
-                else:
-                    payload = {
-                        "status": "success",
-                        "type": "chat",
-                        "response": fb,
-                        "thinking": "",
-                        "tool_status": {},
-                        "chat_id": req.chat_id,
-                        "confidence_score": 0.7,
-                        "request_id": request_id,
-                    }
-                    payload = await _attach_verification(req.user_message, payload)
-                    return payload
-            # if fallback failed, continue with original result path below
-
-        if result is None:
-            payload = {
-                "error": "Agent returned no response",
-                "request_id": request_id,
-            }
-            payload = await _attach_verification(req.user_message, payload)
-            raise HTTPException(status_code=500, detail=payload)
-
-        response_type = result.get("type", "unknown")
-        metrics.record_chat_message("assistant", response_type)
-
-        if response_type == "chat":
-            payload = {
-                "status": "success",
-                "type": "chat",
-                "response": result.get("content", "No response generated"),
-                "thinking": result.get("thinking_trace", ""),
-                "tool_status": result.get("tool_status", {}),
-                "chat_id": result.get("chat_id", req.chat_id),
-                "confidence_score": result.get("confidence_score", 0.0),
-                "request_id": request_id,
-            }
-            payload = await _attach_verification(req.user_message, payload)
-            return payload
-
-        elif response_type == "clarify":
-            # soften clarify with a minimal direct answer fallback if possible
-            fb = await _gemini_fallback(req.user_message, code_preferred=False)
-            if fb:
-                payload = {
-                    "status": "success",
-                    "type": "chat",
-                    "response": fb,
-                    "thinking": result.get("thinking_trace", ""),
-                    "tool_status": result.get("tool_status", {}),
-                    "chat_id": result.get("chat_id", req.chat_id),
-                    "confidence_score": 0.6,
-                    "request_id": request_id,
-                }
-                payload = await _attach_verification(req.user_message, payload)
-                return payload
-
-            return {
-                "status": "success",
-                "type": "clarify",
-                "response": "I need more information to help you better.",
-                "questions": result.get("questions", "Could you provide more details?"),
-                "thinking": result.get("thinking_trace", ""),
-                "tool_status": result.get("tool_status", {}),
-                "chat_id": result.get("chat_id", req.chat_id),
-                "request_id": request_id,
-            }
-
-        elif response_type == "terraform":
-            terraform_code = result.get("terraform_code", "") or tf_code
-            cost_estimate = result.get("cost_estimate", "")
-
-            if terraform_code and infracost_integration.infracost_available:
-                cost_result = infracost_integration.generate_cost_estimate(
-                    terraform_code, "default"
-                )
-                if cost_result.get("success"):
-                    cost_estimate = cost_result
-
-            response_data: Dict[str, Any] = {
-                "status": "success",
-                "type": "terraform",
-                "response": result.get("content", "Terraform code generated."),
-                "terraform_code": terraform_code,
-                "thinking": result.get("thinking_trace", ""),
-                "tool_status": result.get("tool_status", {}),
-                "chat_id": result.get("chat_id", req.chat_id),
-                "confidence_score": result.get("confidence_score", 0.0),
-                "request_id": request_id,
-                "artifacts": {
-                    "formatted_code": result.get("formatted_code", "") or terraform_code,
-                    "validation_output": result.get("validation_output", ""),
-                    "diff": result.get("diff", ""),
-                },
-                "analysis": {
-                    "security_findings": result.get("security_findings", []),
-                    "best_practices": result.get("best_practices", []),
-                    "blast_radius_warnings": result.get("blast_radius_warnings", []),
-                },
-            }
-            if cost_estimate and cost_estimate != "Skipped":
-                response_data["cost_estimate"] = cost_estimate
-                if isinstance(cost_estimate, dict) and cost_estimate.get("success"):
-                    monthly_cost = cost_estimate.get("cost_estimate", {}).get("monthly_cost", 0)
-                    metrics.record_cost_estimation("infracost", monthly_cost)
-
-            github_status = result.get("github_status")
-            if github_status and github_status != "Skipped":
-                response_data["github_status"] = github_status
-
-            return response_data
-
-        else:
-            return {
-                "status": "error",
-                "type": "error",
-                "error": f"Unexpected response type: {response_type}",
-                "request_id": request_id,
-            }
+        payload = reply.model_dump()
+        payload["request_id"] = request_id
+        payload = await _attach_verification(req.user_message, payload)
+        return payload
 
     except HTTPException:
         raise
@@ -657,13 +408,11 @@ async def chat_with_ai(req: ChatMessageRequest):
 
         payload = {
             "status": "error",
-            "type": "error",
+            "type": ReplyType.ERROR.value,
             "error": f"Server error: {str(e)}",
             "exception_type": type(e).__name__,
             "request_id": request_id,
         }
-
-        # Wrap verification in try-catch to prevent secondary errors
         try:
             payload = await _attach_verification(req.user_message, payload)
         except Exception as ve:
@@ -676,7 +425,9 @@ async def chat_with_ai(req: ChatMessageRequest):
         raise HTTPException(status_code=500, detail=payload)
 
 
-# GET + SSE (EventSource)
+# ---------------------------
+# GET + SSE stream (orchestrator)
+# ---------------------------
 @router.get("/chat/stream")
 async def chat_with_ai_stream(
     chat_id: str = Query(..., description="Chat ID"),
@@ -689,109 +440,32 @@ async def chat_with_ai_stream(
         raise HTTPException(status_code=500, detail="Agent not initialized")
 
     async def generate_stream():
-        last_heartbeat = datetime.now()
         try:
             if not user_message or not user_message.strip():
-                yield f"data: {json.dumps({'error': 'Empty message not allowed', 'done': True, 'request_id': request_id})}\n\n"  # noqa: E501
+                yield f"data: {json.dumps({'error': 'Empty message not allowed', 'done': True, 'request_id': request_id})}\n\n"
                 return
 
-            # initial heartbeat
-            yield f"data: {json.dumps({'heartbeat': True, 'request_id': request_id})}\n\n"  # noqa: E501
+            user_msg_raw = user_message.strip()
+            user_msg_slim, _ = spill_if_too_long(user_msg_raw)
+
             metrics.record_chat_message("user", "terraform")
 
-            # await the async agent call
-            result = await asyncio.wait_for(
-                terraform_agent.process_message(user_message.strip(), chat_id),
-                timeout=180.0,
-            )
+            async for item in stream_pipeline(user_msg_slim, chat_id, terraform_agent):
+                # Attach request id and verification on the final payload
+                item["request_id"] = request_id
+                if item.get("done") and item.get("response"):
+                    try:
+                        item = await _attach_verification(user_message, item)
+                    except Exception as ve:
+                        logger.warning("Verification failed in stream: %s", str(ve))
+                        item["verified"] = False
+                        item["sources"] = []
+                        item["verification_note"] = f"Verification failed: {str(ve)}"
+                yield f"data: {json.dumps(item)}\n\n"
 
-            if result:
-                thinking_trace = result.get("thinking_trace", "")
-                stream_thinking = (
-                    user_message.lower().startswith("debug:") or "thinking" in user_message.lower()
-                )
-
-                if thinking_trace and stream_thinking:
-                    chunk_size = 30
-                    for i in range(0, len(thinking_trace), chunk_size):
-                        chunk = thinking_trace[i : i + chunk_size]
-                        yield f"data: {json.dumps({'thinking_trace': chunk, 'request_id': request_id})}\n\n"  # noqa: E501
-                        await asyncio.sleep(0.03)
-                        if (datetime.now() - last_heartbeat).seconds > 15:
-                            yield f"data: {json.dumps({'heartbeat': True, 'request_id': request_id})}\n\n"  # noqa: E501
-                            last_heartbeat = datetime.now()
-
-                metrics.record_chat_message("assistant", result.get("type", "chat"))
-
-                final_data: Dict[str, Any] = {
-                    "status": "success",
-                    "type": result.get("type", "chat"),
-                    "response": result.get("content", ""),
-                    "terraform_code": result.get("terraform_code", ""),
-                    "cost_estimate": result.get("cost_estimate", ""),
-                    "github_status": result.get("github_status", ""),
-                    "questions": result.get("questions", ""),
-                    "thinking_trace": (thinking_trace if not stream_thinking else ""),
-                    "tool_status": result.get("tool_status", {}),
-                    "chat_id": result.get("chat_id", chat_id),
-                    "confidence_score": result.get("confidence_score", 0.0),
-                    "request_id": request_id,
-                    "done": True,
-                }
-
-                # attach verification (protected)
-                try:
-                    final_data = await _attach_verification(user_message, final_data)
-                except Exception as ve:
-                    logger.warning("Verification failed in stream: %s", str(ve))
-                    final_data["verified"] = False
-                    final_data["sources"] = []
-                    final_data["verification_note"] = f"Verification failed: {str(ve)}"
-
-                if result.get("type") == "terraform":
-                    final_data.update(
-                        {
-                            "artifacts": {
-                                "formatted_code": result.get("formatted_code", ""),
-                                "validation_output": result.get("validation_output", ""),
-                                "diff": result.get("diff", ""),
-                            },
-                            "analysis": {
-                                "security_findings": result.get("security_findings", []),
-                                "best_practices": result.get("best_practices", []),
-                                "blast_radius_warnings": result.get("blast_radius_warnings", []),
-                            },
-                        }
-                    )
-
-                # keep key fields even if falsey
-                final_data = {
-                    k: v
-                    for k, v in final_data.items()
-                    if v
-                    or k
-                    in [
-                        "status",
-                        "type",
-                        "done",
-                        "tool_status",
-                        "chat_id",
-                        "confidence_score",
-                        "request_id",
-                    ]
-                }
-
-                yield f"data: {json.dumps(final_data)}\n\n"
-            else:
-                # Try a minimal fallback in stream as well
-                fb = await _gemini_fallback(user_message, _is_probably_code_request(user_message))
-                if fb:
-                    yield f"data: {json.dumps({'status': 'success', 'type': 'chat', 'response': fb, 'done': True, 'request_id': request_id})}\n\n"  # noqa: E501
-                else:
-                    yield f"data: {json.dumps({'status': 'error', 'type': 'error', 'error': 'No response generated', 'done': True, 'request_id': request_id})}\n\n"  # noqa: E501
         except Exception as e:
             logger.error("Exception in /chat/stream: %s", str(e))
-            yield f"data: {json.dumps({'status': 'error', 'type': 'error', 'error': str(e), 'done': True, 'request_id': request_id})}\n\n"  # noqa: E501
+            yield f"data: {json.dumps({'status': 'error', 'type': 'error', 'error': str(e), 'done': True, 'request_id': request_id})}\n\n"
 
     return StreamingResponse(
         generate_stream(),
@@ -805,7 +479,7 @@ async def chat_with_ai_stream(
 
 
 # ---------------------------
-# OpenAI-compatible adapter for UIs like Open WebUI
+# OpenAI-compatible adapter
 # ---------------------------
 class OAIMsg(BaseModel):
     role: Literal["system", "user", "assistant"]
@@ -819,7 +493,6 @@ class OAIChatReq(BaseModel):
 
 
 def _oai_extract_user_text(messages: List[OAIMsg]) -> str:
-    # last user message wins; fallback to last message
     for m in reversed(messages):
         if m.role == "user":
             return (m.content or "").strip()
@@ -829,56 +502,6 @@ def _oai_extract_user_text(messages: List[OAIMsg]) -> str:
 def _chunk(s: str, n: int = 120):
     for i in range(0, len(s), n):
         yield s[i : i + n]
-
-
-def _extract_text(result: Optional[Dict[str, Any]]) -> str:
-    if not isinstance(result, dict):
-        return ""
-    candidates = [
-        result.get("content"),
-        result.get("response"),
-        result.get("answer"),
-        result.get("text"),
-        result.get("message"),
-        result.get("output"),
-    ]
-    for c in candidates:
-        if isinstance(c, str) and c.strip():
-            return c
-    return ""
-
-
-def _render_text_for_oai(result: Optional[Dict[str, Any]]) -> str:
-    if not isinstance(result, dict):
-        return ""
-    text = _extract_text(result).strip()
-    if text:
-        return text
-
-    rtype = (result.get("type") or "").strip().lower()
-
-    if rtype == "clarify":
-        qs = result.get("questions")
-        if isinstance(qs, (list, tuple)):
-            qstr = "\n".join(f"- {q}" for q in qs if q)
-        else:
-            qstr = str(qs or "Could you provide more details?")
-        return f"I need more information:\n{qstr}".strip()
-
-    if rtype == "terraform":
-        summary = (result.get("content") or "Terraform code generated.").strip()
-        tf = result.get("terraform_code") or result.get("artifacts", {}).get("formatted_code", "")
-        tf = (tf or "").strip()
-        if tf:
-            return f"{summary}\n\n```hcl\n{tf}\n```"
-        return summary
-
-    try:
-        safe = {k: v for k, v in result.items() if k != "thinking_trace"}
-        blob = json.dumps(safe, ensure_ascii=False)
-        return blob[:4000]
-    except Exception:
-        return "No content generated."
 
 
 @router.get("/v1/models")
@@ -898,13 +521,6 @@ def oai_models():
 
 @router.post("/v1/chat/completions")
 async def oai_chat(req: OAIChatReq):
-    """
-    UPDATED:
-      - Always convert agent/Gemini output into a single assistant message string.  # noqa: E501
-      - For Terraform responses, use format_infra_reply() so code + diagnostics render  # noqa: E501
-        in the same bubble.
-      - Then wrap with openai_chat_response() so Open WebUI displays it reliably.  # noqa: E501
-    """
     if terraform_agent is None:
         raise HTTPException(status_code=500, detail="Agent not initialized")
 
@@ -913,137 +529,60 @@ async def oai_chat(req: OAIChatReq):
     if not user_text:
         raise HTTPException(status_code=400, detail="Empty message")
 
-    # ---------- Non-streaming ----------
+    user_text, _ = spill_if_too_long(user_text)
+
+    # Non-streaming path
     if not req.stream:
-        result = await asyncio.wait_for(
-            terraform_agent.process_message(user_text, chat_id), timeout=180.0
+        reply: AgentReply = await asyncio.wait_for(
+            run_pipeline(user_text, chat_id, terraform_agent), timeout=180.0
         )
-
-        text = ""
-        rtype = (result or {}).get("type", "") if isinstance(result, dict) else ""
-
-        # Terraform branch -> format with code + diagnostics
-        if isinstance(result, dict) and rtype == "terraform":
-            tf_code = (
-                result.get("terraform_code")
-                or result.get("artifacts", {}).get("formatted_code")
-                or ""
-            ).strip()
-            diagnostics = (
-                result.get("validation_output")
-                or result.get("artifacts", {}).get("validation_output")
-                or ""
-            ).strip()
-
-            status = "ok"
-            # If we have diagnostics that look like errors or code missing,
-            # mark failed
-            if diagnostics and re.search(r"\berror\b", diagnostics, re.IGNORECASE):
-                status = "validation_failed"
-            if not tf_code:
-                status = "validation_failed"
-
-            if not tf_code:
-                # Try Gemini fallback for code if missing
-                fb = await _gemini_fallback(user_text, code_preferred=True)
-                if fb:
-                    tf_code = _extract_hcl_from_text(fb)
-                    status = "ok" if tf_code and not diagnostics else status
-
-            text = format_infra_reply(status=status, code=tf_code, diagnostics=diagnostics)
-
-        else:
-            # Non-infra -> render normally then apply fallback if needed
-            text = _render_text_for_oai(result)
-            missing_or_clarify = _looks_like_empty_or_error_text(text) or rtype == "clarify"
-            if missing_or_clarify:
-                fb = await _gemini_fallback(
-                    user_text,
-                    code_preferred=_is_probably_code_request(user_text),
-                )
-                if fb:
-                    if _is_probably_code_request(user_text):
-                        tf = _extract_hcl_from_text(fb)
-                        text = format_infra_reply(status="ok", code=tf, diagnostics=None)
-                    else:
-                        text = fb
-
-        if not text or not text.strip():
-            text = "I'm ready to help you with Terraform. What would you like to do?"  # noqa: E501
-
+        text = (
+            reply.response.strip()
+            or "I'm ready to help you with Terraform. What would you like to do?"
+        )
         return JSONResponse(openai_chat_response(text, model=req.model or "terraform-agent"))
 
-    # ---------- Streaming (delta) ----------
+    # Streaming path (send one full message chunked)
     async def gen():
         try:
-            result = await asyncio.wait_for(
-                terraform_agent.process_message(user_text, chat_id),
+            reply: AgentReply = await asyncio.wait_for(
+                run_pipeline(user_text, chat_id, terraform_agent),
                 timeout=180.0,
             )
-
-            rtype = (result or {}).get("type", "") if isinstance(result, dict) else ""
-            if isinstance(result, dict) and rtype == "terraform":
-                tf_code = (
-                    result.get("terraform_code")
-                    or result.get("artifacts", {}).get("formatted_code")
-                    or ""
-                ).strip()
-                diagnostics = (
-                    result.get("validation_output")
-                    or result.get("artifacts", {}).get("validation_output")
-                    or ""
-                ).strip()
-                status = "ok"
-                if diagnostics and re.search(r"\berror\b", diagnostics, re.IGNORECASE):
-                    status = "validation_failed"
-                if not tf_code:
-                    # Try code fallback
-                    fb = await _gemini_fallback(user_text, code_preferred=True)
-                    if fb:
-                        tf_code = _extract_hcl_from_text(fb)
-                        status = "ok" if tf_code and not diagnostics else status
-                text = format_infra_reply(status=status, code=tf_code, diagnostics=diagnostics)
-            else:
-                text = _render_text_for_oai(result)
-                if _looks_like_empty_or_error_text(text) or rtype == "clarify":
-                    fb = await _gemini_fallback(
-                        user_text,
-                        code_preferred=_is_probably_code_request(user_text),
-                    )
-                    if fb:
-                        if _is_probably_code_request(user_text):
-                            tf = _extract_hcl_from_text(fb)
-                            text = format_infra_reply(status="ok", code=tf, diagnostics=None)
-                        else:
-                            text = fb
-
-            if not text or not text.strip():
-                text = (
-                    "I'm ready to help you with Terraform. What would you like to do?"  # noqa: E501
-                )
-
-            for part in _chunk(text):
-                yield "data: " + json.dumps(
-                    {
-                        "id": f"cmpl-{uuid4().hex}",
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": req.model or "terraform-agent",
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {"content": part},
-                                "finish_reason": None,
-                            }
-                        ],
-                    }
-                ) + "\n\n"
-                await asyncio.sleep(0)
-            yield "data: [DONE]\n\n"
+            text = reply.response.strip()
+            if not text:
+                raise RuntimeError("No content generated")
         except Exception as e:
-            yield "data: " + json.dumps(
-                {"error": {"message": str(e), "type": "internal_error"}}
-            ) + "\n\n"
+            raise HTTPException(status_code=500, detail={"message": str(e)})
+
+        def sse(obj: dict) -> str:
+            return "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
+
+        base_chunk = {
+            "id": f"cmpl-{uuid4().hex}",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": req.model or "terraform-agent",
+        }
+
+        yield sse(
+            {
+                **base_chunk,
+                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+            }
+        )
+
+        for part in _chunk(text, 120):
+            yield sse(
+                {
+                    **base_chunk,
+                    "choices": [{"index": 0, "delta": {"content": part}, "finish_reason": None}],
+                }
+            )
+            await asyncio.sleep(0)
+
+        yield sse({**base_chunk, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+        yield "data: [DONE]\n\n"
 
     return StreamingResponse(
         gen(),
@@ -1056,7 +595,9 @@ async def oai_chat(req: OAIChatReq):
     )
 
 
-# Delete branch (async) — do NOT decorate with async-unsafe metrics decorator
+# ---------------------------
+# Delete branch (async)
+# ---------------------------
 @router.delete("/github/branch/{branch_name}")
 async def delete_branch(branch_name: str):
     try:
@@ -1064,10 +605,7 @@ async def delete_branch(branch_name: str):
         if result.get("success"):
             return {"status": "success", "message": result.get("message")}
         else:
-            return {
-                "status": "error",
-                "error": result.get("error", "Failed to delete branch"),
-            }
+            return {"status": "error", "error": result.get("error", "Failed to delete branch")}
     except Exception as e:
         logger.error("Failed to delete branch: %s", str(e))
         raise HTTPException(status_code=500, detail=f"Failed to delete branch: {str(e)}")
@@ -1122,11 +660,76 @@ async def validate_terraform_code(request: ValidateRequest):
         )
 
         guardrails = TerraformGuardrails()
-        formatted_code = terraform_validator.format_terraform_code(terraform_code)
-        validation_result = terraform_validator.validate_terraform_syntax(formatted_code)
-        security_analysis = infrastructure_analyzer.analyze_terraform_resources(formatted_code)
+
+        normalized = terraform_validator.normalize_unicode(terraform_code)
+        scaffolded = normalized
+
+        with _clear_tf_cli_args_env():
+            fmt_res = terraform_validator.format_terraform_code(scaffolded)
+            if getattr(fmt_res, "success", None) is True and fmt_res.data:
+                formatted_code = fmt_res.data.get("formatted_code", scaffolded)
+            else:
+                formatted_code = scaffolded
+                logger.warning(
+                    "terraform_validator.format_terraform_code failed: %s",
+                    getattr(fmt_res, "error", None),
+                )
+
+            val_res = terraform_validator.validate_terraform_syntax(formatted_code)
+            if getattr(val_res, "success", None) is True and val_res.data:
+                validation_result = val_res.data
+            else:
+                validation_result = {
+                    "valid": False,
+                    "error": getattr(val_res, "error", "Validation failed"),
+                    "output": getattr(val_res, "data", {}),
+                }
+
+            infra_res = infrastructure_analyzer.analyze_terraform_resources(formatted_code)
+            if getattr(infra_res, "success", None) is True and infra_res.data:
+                security_analysis = infra_res.data
+            else:
+                security_analysis = {
+                    "security_concerns": [],
+                    "estimated_monthly_cost": 0,
+                    "resource_count": 0,
+                    "error": getattr(infra_res, "error", None),
+                }
+
+        # Save the code we validated too
+        _save_terraform_to_disk(formatted_code, Path(os.getenv("WORKING_DIRECTORY", "/app")))
+
         security_issues = guardrails.check_security_issues(formatted_code)
         terraform_validation = guardrails.validate_terraform_response(formatted_code)
+
+        hints: List[str] = []
+        code_for_hints = formatted_code
+
+        if re.search(r"\baws_", code_for_hints, re.I):
+            m = re.search(r'provider\s+"aws"\s*{([^}]*)}', code_for_hints, flags=re.I | re.S)
+            has_region = bool(m and re.search(r"\bregion\s*=", m.group(1), flags=re.I))
+            if not has_region:
+                if re.search(r'provider\s+"aws"\s*{', code_for_hints, flags=re.I):
+                    hints.append(
+                        'AWS: add region in provider, e.g. `provider "aws" { region = "us-east-1" }`'
+                    )
+                else:
+                    hints.append(
+                        'AWS: add a provider block with region, e.g. `provider "aws" { region = "us-east-1" }`'
+                    )
+
+        if re.search(r"\bgoogle_", code_for_hints, re.I):
+            m = re.search(r'provider\s+"google"\s*{([^}]*)}', code_for_hints, flags=re.I | re.S)
+            has_g_region = bool(m and re.search(r"\b(region|zone)\s*=", m.group(1), flags=re.I))
+            if not has_g_region:
+                if re.search(r'provider\s+"google"\s*{', code_for_hints, flags=re.I):
+                    hints.append(
+                        'Google: set `region` or `zone` in `provider "google"` (and `project`).'
+                    )
+                else:
+                    hints.append(
+                        'Google: add `provider "google" { project = "...", region = "us-central1" }` (or set `zone`).'
+                    )
 
         response_data: Dict[str, Any] = {
             "status": "success",
@@ -1140,22 +743,23 @@ async def validate_terraform_code(request: ValidateRequest):
                 "security_concerns": security_analysis.get("security_concerns", []),
                 "estimated_monthly_cost": security_analysis.get("estimated_monthly_cost", 0),
                 "resource_count": security_analysis.get("resource_count", 0),
+                "raw": security_analysis,
             },
         }
 
-        if request.run_policy_checks:
-            policy_result = policy_engine.validate_with_policies(formatted_code)
-            response_data["policy_validation"] = policy_result
-            if policy_result.get("violations"):
-                policy_report = policy_engine.create_policy_report(policy_result, formatted_code)
-                response_data["policy_report"] = policy_report
+        if hints:
+            response_data["hints"] = {"missing_regions": hints}
 
         if infracost_integration.infracost_available:
-            cost_result = infracost_integration.generate_cost_estimate(terraform_code, "default")
+            usage_yaml = getattr(request, "usage_yaml", None)
+            cost_result = _infracost_breakdown_hcl(formatted_code, usage_yaml=usage_yaml)
             if cost_result.get("success"):
                 response_data["cost_estimate"] = cost_result
-                monthly_cost = cost_result.get("cost_estimate", {}).get("monthly_cost", 0)
-                metrics.record_cost_estimation("infracost", monthly_cost)
+                try:
+                    monthly_cost = cost_result.get("cost_estimate", {}).get("monthly_cost", 0)
+                    metrics.record_cost_estimation("infracost", float(monthly_cost))
+                except Exception:
+                    pass
 
         return response_data
     except Exception as e:
@@ -1173,15 +777,11 @@ def get_metrics():
 
 
 @router.get("/metrics/summary")
-@metrics.track_request("GET", "/metrics/summary")  # sync -> safe
+@metrics.track_request("GET", "/metrics/summary")
 def get_metrics_summary():
     try:
         summary = metrics.get_metrics_summary()
-        return {
-            "status": "success",
-            "metrics": summary,
-            "timestamp": datetime.now().isoformat(),
-        }
+        return {"status": "success", "metrics": summary, "timestamp": datetime.now().isoformat()}
     except Exception as e:
         logger.error("Metrics summary failed: %s", str(e))
         return {"status": "error", "error": str(e)}
@@ -1191,7 +791,7 @@ def get_metrics_summary():
 # Budget / Cost
 # ---------------------------
 @router.get("/budgets/{workspace}")
-@metrics.track_request("GET", "/budgets")  # sync -> safe
+@metrics.track_request("GET", "/budgets")
 def get_budget_status(workspace: str):
     try:
         budget_status = infracost_integration.get_budget_status(workspace)
@@ -1202,7 +802,7 @@ def get_budget_status(workspace: str):
 
 
 @router.put("/budgets/{workspace}")
-@metrics.track_request("PUT", "/budgets")  # sync -> safe
+@metrics.track_request("PUT", "/budgets")
 def update_budget(workspace: str, req: BudgetUpdateRequest):
     try:
         result = infracost_integration.update_budget(
@@ -1211,60 +811,81 @@ def update_budget(workspace: str, req: BudgetUpdateRequest):
         if result.get("success"):
             return {"status": "success", **result}
         else:
-            return {
-                "status": "error",
-                "error": result.get("error", "Budget update failed"),
-            }
+            return {"status": "error", "error": result.get("error", "Budget update failed")}
     except Exception as e:
         logger.error("Budget update failed: %s", str(e))
         return {"status": "error", "error": str(e)}
 
 
 @router.post("/cost/diff")
-@metrics.track_request("POST", "/cost/diff")  # sync -> safe
+@metrics.track_request("POST", "/cost/diff")
 def generate_cost_diff(request: dict):
     try:
         old_terraform = request.get("old_terraform", "")
         new_terraform = request.get("new_terraform", "")
         workspace = request.get("workspace", "default")
+        usage_yaml_old = request.get("usage_yaml_old")
+        usage_yaml_new = request.get("usage_yaml_new")
+
         if not old_terraform or not new_terraform:
+            return {"status": "error", "error": "Both old_terraform and new_terraform are required"}
+
+        try:
+            diff_result = infracost_integration.generate_cost_diff(
+                old_terraform, new_terraform, workspace
+            )
+            if diff_result.get("success"):
+                return {"status": "success", **diff_result}
+        except Exception:
+            pass
+
+        old_cost = _infracost_breakdown_hcl(old_terraform, usage_yaml_old)
+        new_cost = _infracost_breakdown_hcl(new_terraform, usage_yaml_new)
+        if not (old_cost.get("success") and new_cost.get("success")):
             return {
                 "status": "error",
-                "error": "Both old_terraform and new_terraform are required",
+                "error": f"Cost diff failed: old={old_cost.get('error')}, new={new_cost.get('error')}",
             }
-        diff_result = infracost_integration.generate_cost_diff(
-            old_terraform, new_terraform, workspace
-        )
-        if diff_result.get("success"):
-            return {"status": "success", **diff_result}
-        else:
-            return {
-                "status": "error",
-                "error": diff_result.get("error", "Cost diff generation failed"),
-            }
+        old_v = float(old_cost["cost_estimate"]["monthly_cost"] or 0)
+        new_v = float(new_cost["cost_estimate"]["monthly_cost"] or 0)
+        return {
+            "status": "success",
+            "success": True,
+            "old_monthly_cost": old_v,
+            "new_monthly_cost": new_v,
+            "delta_monthly_cost": new_v - old_v,
+            "currency": new_cost.get("currency", "USD"),
+            "old": old_cost,
+            "new": new_cost,
+        }
     except Exception as e:
         logger.error("Cost diff generation failed: %s", str(e))
         return {"status": "error", "error": str(e)}
 
 
 @router.post("/cost/estimate")
-@metrics.track_request("POST", "/cost/estimate")  # sync -> safe
+@metrics.track_request("POST", "/cost/estimate")
 def generate_cost_estimate(request: dict):
     try:
         terraform_code = request.get("terraform_code", "")
-        workspace = request.get("workspace", "default")
+        usage_yaml = request.get("usage_yaml")
         if not terraform_code:
-            return {"status": "error", "error": "terraform_code is required"}
-        cost_result = infracost_integration.generate_cost_estimate(terraform_code, workspace)
+            terraform_code = _read_last_terraform_from_disk(
+                Path(os.getenv("WORKING_DIRECTORY", "/app"))
+            )
+            if not terraform_code:
+                return {"status": "error", "error": "terraform_code is required"}
+
+        cost_result = _infracost_breakdown_hcl(terraform_code, usage_yaml=usage_yaml)
         if cost_result.get("success"):
-            monthly_cost = cost_result.get("cost_estimate", {}).get("monthly_cost", 0)
-            metrics.record_cost_estimation("infracost", monthly_cost)
+            try:
+                monthly_cost = cost_result.get("cost_estimate", {}).get("monthly_cost", 0)
+                metrics.record_cost_estimation("infracost", float(monthly_cost))
+            except Exception:
+                pass
             return {"status": "success", **cost_result}
-        else:
-            return {
-                "status": "error",
-                "error": cost_result.get("error", "Cost estimation failed"),
-            }
+
+        return {"status": "error", "error": cost_result.get("error", "Cost estimation failed")}
     except Exception as e:
         logger.error("Cost estimation failed: %s", str(e))
         return {"status": "error", "error": str(e)}
@@ -1274,7 +895,7 @@ def generate_cost_estimate(request: dict):
 # Policy
 # ---------------------------
 @router.get("/policy/summary")
-@metrics.track_request("GET", "/policy/summary")  # sync -> safe
+@metrics.track_request("GET", "/policy/summary")
 def get_policy_summary():
     try:
         summary = policy_engine.get_policy_summary()
@@ -1285,39 +906,41 @@ def get_policy_summary():
 
 
 @router.post("/policy/validate")
-@metrics.track_request("POST", "/policy/validate")  # sync -> safe
+@metrics.track_request("POST", "/policy/validate")
 def validate_with_policies(request: dict):
     try:
         terraform_code = request.get("terraform_code", "")
         if not terraform_code:
-            return {"status": "error", "error": "terraform_code is required"}
+            terraform_code = _read_last_terraform_from_disk(
+                Path(os.getenv("WORKING_DIRECTORY", "/app"))
+            )
+            if not terraform_code:
+                return {"status": "error", "error": "terraform_code is required"}
         validation_result = policy_engine.validate_with_policies(terraform_code)
         report = None
         if validation_result.get("violations"):
             report = policy_engine.create_policy_report(validation_result, terraform_code)
-        return {
-            "status": "success",
-            "validation_result": validation_result,
-            "report": report,
-        }
+        return {"status": "success", "validation_result": validation_result, "report": report}
     except Exception as e:
         logger.error("Policy validation failed: %s", str(e))
         return {"status": "error", "error": str(e)}
 
 
 # ---------------------------
-# Workflow: terraform -> PR (kept async here; not decorated by metrics)
+# Workflow: terraform -> PR
 # ---------------------------
 @router.post("/workflow/terraform-to-pr")
 def terraform_to_pr_workflow(request: dict):
-    """
-    Non-decorated by metrics (sync wrapper to avoid coroutine mishandling).
-    """
     try:
         terraform_code = (request.get("terraform_code") or "").strip()
+        if not terraform_code:
+            terraform_code = _read_last_terraform_from_disk(
+                Path(os.getenv("WORKING_DIRECTORY", "/app"))
+            )
         workspace = request.get("workspace") or "default"
         commit_message = request.get("commit_message") or "feat(iac): add demo stack via TF Agent"
         branch_name = request.get("branch_name") or f"tf/feature-{uuid4().hex[:8]}"
+        base_branch = (request.get("base") or os.getenv("GITHUB_BASE_BRANCH") or "main").strip()
 
         if not terraform_code:
             return {"status": "error", "error": "terraform_code is required"}
@@ -1335,15 +958,17 @@ def terraform_to_pr_workflow(request: dict):
             }
             return workflow_result
 
+        os.environ.setdefault("GITHUB_BASE_BRANCH", base_branch)
+
         pr_result = _asdict(
             github_integration.create_branch_and_pr(terraform_code, commit_message, branch_name)
         )
 
         workflow_result["workflow_steps"]["github_pr"] = {
             "status": "completed" if pr_result.get("success") else "failed",
-            "result": pr_result,
+            "result": {**pr_result, "requested_base": base_branch},
         }
-        workflow_result["final_result"] = pr_result
+        workflow_result["final_result"] = workflow_result["workflow_steps"]["github_pr"]["result"]
         return workflow_result
 
     except HTTPException:
@@ -1365,14 +990,10 @@ def terraform_to_pr_workflow(request: dict):
 # Admin
 # ---------------------------
 @router.post("/admin/cache/clear")
-@metrics.track_request("POST", "/admin/cache/clear")  # sync -> safe
+@metrics.track_request("POST", "/admin/cache/clear")
 def clear_system_cache():
     try:
-        cache_cleared = {
-            "chat_sessions": 0,
-            "tool_cache": 0,
-            "cost_estimates": 0,
-        }
+        cache_cleared = {"chat_sessions": 0, "tool_cache": 0, "cost_estimates": 0}
         return {
             "status": "success",
             "message": "System caches cleared",
@@ -1385,7 +1006,7 @@ def clear_system_cache():
 
 
 @router.get("/admin/system/info")
-@metrics.track_request("GET", "/admin/system/info")  # sync -> safe
+@metrics.track_request("GET", "/admin/system/info")
 def get_system_info():
     try:
         import platform
@@ -1398,7 +1019,6 @@ def get_system_info():
                 "python_version": sys.version,
                 "current_directory": str(Path.cwd()),
                 "environment_variables": {
-                    "GEMINI_API_KEY": ("configured" if os.getenv("GEMINI_API_KEY") else "missing"),
                     "GITHUB_TOKEN": ("configured" if os.getenv("GITHUB_TOKEN") else "missing"),
                     "GITHUB_REPO": os.getenv("GITHUB_REPO", "not configured"),
                     "INFRACOST_API_KEY": (
@@ -1409,7 +1029,7 @@ def get_system_info():
             "integrations": {
                 "terraform_agent": terraform_agent is not None,
                 "github_integration": github_integration.available,
-                "infracost_integration": infracost_integration.infracost_available,  # noqa: E501
+                "infracost_integration": infracost_integration.infracost_available,
                 "policy_engine": True,
                 "metrics": True,
             },
@@ -1426,7 +1046,7 @@ def get_system_info():
 
 
 # ---------------------------
-# SECURE/JWT endpoints (not decorated by metrics)
+# SECURE/JWT endpoints
 # ---------------------------
 _RT = _RT_Settings()
 _limiter2 = _rt_Limiter(key_func=_rt_get_remote_address)
@@ -1459,19 +1079,25 @@ async def _rt_secure_chat(
 
 @router.post("/ai/generate-tests")
 async def _rt_generate_tests(req: dict, _=_rt_Depends(_rt_require_jwt)):
-    tf_code = req.get("terraform_code", "")
+    tf_code = req.get("terraform_code", "") or _read_last_terraform_from_disk(
+        Path(os.getenv("WORKING_DIRECTORY", "/app"))
+    )
     return JSONResponse(await _rt_ai_tests(tf_code))
 
 
 @router.post("/policy/validate/ast")
 async def _rt_policy_validate_ast(req: dict, _=_rt_Depends(_rt_require_jwt)):
-    tf_code = req.get("terraform_code", "")
+    tf_code = req.get("terraform_code", "") or _read_last_terraform_from_disk(
+        Path(os.getenv("WORKING_DIRECTORY", "/app"))
+    )
     return JSONResponse(await _rt_validate_ast(tf_code))
 
 
 @router.post("/cost/estimate/async")
 async def _rt_cost_async(req: dict, _=_rt_Depends(_rt_require_jwt)):
-    tf_code = req.get("terraform_code", "")
+    tf_code = req.get("terraform_code", "") or _read_last_terraform_from_disk(
+        Path(os.getenv("WORKING_DIRECTORY", "/app"))
+    )
     currency = (req.get("currency") or "USD").upper()
     task = _rt_celery.send_task("infracost.estimate", args=[tf_code, currency])
     return {"success": True, "data": {"task_id": task.id}, "error": ""}
@@ -1494,7 +1120,9 @@ async def _rt_task_status(task_id: str, _=_rt_Depends(_rt_require_jwt)):
 
 @router.post("/cost/estimate/v2")
 async def _rt_cost_estimate_v2(req: dict, _=_rt_Depends(_rt_require_jwt)):
-    tf_code = req.get("terraform_code", "")
+    tf_code = req.get("terraform_code", "") or _read_last_terraform_from_disk(
+        Path(os.getenv("WORKING_DIRECTORY", "/app"))
+    )
     currency = (req.get("currency") or "USD").upper()
     res = await _rt_cost_v2(tf_code, currency=currency)
     if res.get("success"):
@@ -1527,33 +1155,25 @@ async def _rt_notify(req: dict, _=_rt_Depends(_rt_require_jwt)):
             await client.post(slack, json={"text": text})
         if teams:
             await client.post(teams, json={"text": text})
-    return {
-        "success": True,
-        "data": {"posted": bool(slack or teams)},
-        "error": "",
-    }
+    return {"success": True, "data": {"posted": bool(slack or teams)}, "error": ""}
 
 
 @router.post("/visualize")
 async def _rt_visualize(req: dict, _=_rt_Depends(_rt_require_jwt)):
-    tf_code = req.get("terraform_code", "")
+    tf_code = req.get("terraform_code", "") or _read_last_terraform_from_disk(
+        Path(os.getenv("WORKING_DIRECTORY", "/app"))
+    )
     from os import path as _os_path
 
     with _rt_secure_tempdir("graph_v2_") as d:
         with open(_os_path.join(d, "main.tf"), "w", encoding="utf-8") as f:
             f.write(tf_code)
-        rc, out, err = await _rt_run_cmd_async("terraform", "init", "-input=false", cwd=d)
+        rc, out, err = await _rt_run_cmd_async(
+            "terraform", "init", "-no-color", "-input=false", cwd=d
+        )
         if rc != 0:
-            return {
-                "success": False,
-                "data": {"stderr": err},
-                "error": "terraform init failed",
-            }
-        rc, dot, err = await _rt_run_cmd_async("terraform", "graph", cwd=d)
+            return {"success": False, "data": {"stderr": err}, "error": "terraform init failed"}
+        rc, dot, err = await _rt_run_cmd_async("terraform", "graph", "-no-color", cwd=d)
         if rc != 0:
-            return {
-                "success": False,
-                "data": {"stderr": err},
-                "error": "terraform graph failed",
-            }
+            return {"success": False, "data": {"stderr": err}, "error": "terraform graph failed"}
         return {"success": True, "data": {"dot": dot}, "error": ""}

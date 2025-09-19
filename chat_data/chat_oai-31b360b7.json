@@ -1,0 +1,27 @@
+{
+  "chat_id": "oai-31b360b7",
+  "created_at": "2025-09-14T07:22:02.870356",
+  "last_updated": "2025-09-14T07:22:02.891427",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "i also said un scan, then auto-hardening (block public access, AES256/SSE-KMS, versioning, lifecycle). Explain each fix..  where is the explanation",
+      "timestamp": "2025-09-14T07:22:02.870368",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "content": "I encountered an error while processing your request. Please try again.",
+      "timestamp": "2025-09-14T07:22:02.891370",
+      "metadata": {
+        "type": "chat",
+        "confidence": 0.05
+      }
+    }
+  ],
+  "title": "I also said un scan,",
+  "archived": false,
+  "settings": {},
+  "summary": ""
+}

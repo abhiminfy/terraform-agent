@@ -1,590 +1,488 @@
-# policy_engine.py - Policy-as-code implementation with tfsec/checkov
-# integration
+# src/app/services/policy_engine.py
+"""
+Advanced Policy Engine for Terraform code.
+
+- Runs external scanners when available (tfsec, checkov, conftest, tflint, terrascan)
+- Adds lightweight built-in rules as a fallback
+- Normalizes findings into a common schema
+- Generates a concise, human-friendly Markdown report
+- Designed to degrade gracefully when tools are missing
+
+This file is self-contained and safe to import even if binaries are not installed.
+"""
+
+from __future__ import annotations
+
 import json
-import json as _pe_json
 import logging
+import os
+import re
+import shutil
 import subprocess
 import tempfile
-from io import StringIO as _PE_StringIO
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
-from typing import Any as _Any
-from typing import Dict
-from typing import Dict as _Dict
-from typing import List
-from typing import List as _List
+from typing import Any, Dict, List, Optional, Tuple
 
-import hcl2 as _pe_hcl2
+# Optional metrics (no-op fallback if unavailable)
+try:
+    from src.app.core.metrics import metrics
+except Exception:  # pragma: no cover
 
-from src.app.utils.utils import run_cmd_async as _pe_run_cmd_async
-from src.app.utils.utils import secure_tempdir as _pe_secure_tempdir
+    class _NoopMetrics:
+        def __getattr__(self, name):
+            def _inner(*args, **kwargs):
+                class _Ctx:
+                    def __enter__(self_):
+                        return None
+
+                    def __exit__(self_, exc_type, exc, tb):
+                        return False
+
+                return _Ctx() if name.endswith("_timer") else (lambda *a, **k: None)
+
+            return _inner
+
+    metrics = _NoopMetrics()  # type: ignore
 
 logger = logging.getLogger(__name__)
 
 
-class PolicyEngine:
-    """Policy-as-code engine for Terraform validation with multiple security scanners"""
-
-    def __init__(self):
-        self.policy_rules = self._load_default_policies()
-        self.enabled_scanners = self._detect_available_scanners()
-
-    def _detect_available_scanners(self) -> Dict[str, bool]:
-        """Detect which security scanners are available"""
-        scanners = {
-            "tfsec": False,
-            "checkov": False,
-            "terrascan": False,
-            "tflint": False,
-        }
-
-        for scanner in scanners.keys():
-            try:
-                result = subprocess.run([scanner, "--version"], capture_output=True, timeout=5)
-                scanners[scanner] = result.returncode == 0
-            except (FileNotFoundError, subprocess.TimeoutExpired):
-                continue
-
-        logger.info(f"Available security scanners: {[k for k, v in scanners.items() if v]}")
-        return scanners
-
-    def _load_default_policies(self) -> Dict[str, Any]:
-        """Load default security policies"""
-        return {
-            "aws_security_groups": {
-                "no_unrestricted_ingress": {
-                    "severity": "HIGH",
-                    "pattern": r'cidr_blocks\s*=\s*\["0\.0\.0\.0/0"\]',
-                    "message": "Security group allows unrestricted ingress (0.0.0.0/0)",
-                },
-                "no_ssh_from_internet": {
-                    "severity": "CRITICAL",
-                    "pattern": r'from_port\s*=\s*22.*cidr_blocks\s*=\s*\["0\.0\.0\.0/0"\]',
-                    "message": "SSH (port 22) accessible from internet",
-                },
-            },
-            "aws_s3_buckets": {
-                "block_public_access": {
-                    "severity": "HIGH",
-                    "pattern": r"block_public_acls\s*=\s*false",
-                    "message": "S3 bucket allows public ACLs",
-                },
-                "versioning_enabled": {
-                    "severity": "MEDIUM",
-                    "pattern": r"versioning\s*\{\s*enabled\s*=\s*false",
-                    "message": "S3 bucket versioning disabled",
-                },
-            },
-            "aws_rds": {
-                "encryption_at_rest": {
-                    "severity": "HIGH",
-                    "pattern": r"storage_encrypted\s*=\s*false",
-                    "message": "RDS instance encryption at rest disabled",
-                },
-                "backup_retention": {
-                    "severity": "MEDIUM",
-                    "pattern": r"backup_retention_period\s*=\s*0",
-                    "message": "RDS backup retention disabled",
-                },
-            },
-            "general": {
-                "no_hardcoded_secrets": {
-                    "severity": "CRITICAL",
-                    "pattern": r'(password|secret|key)\s*=\s*"[^$][^{][^v][^a][^r].*"',
-                    "message": "Hardcoded credentials detected",
-                }
-            },
-        }
-
-    def validate_with_policies(self, terraform_code: str) -> Dict[str, Any]:
-        """Validate Terraform code against all available policies"""
-        if not terraform_code or not terraform_code.strip():
-            return {
-                "valid": False,
-                "violations": [],
-                "error": "Empty Terraform code provided",
-            }
-
-        violations = []
-
-        # Run internal policy checks
-        internal_violations = self._run_internal_policies(terraform_code)
-        violations.extend(internal_violations)
-
-        # Run external security scanners
-        external_violations = self._run_external_scanners(terraform_code)
-        violations.extend(external_violations)
-
-        # Determine overall validation result
-        critical_violations = [v for v in violations if v.get("severity") == "CRITICAL"]
-        high_violations = [v for v in violations if v.get("severity") == "HIGH"]
-
-        is_valid = len(critical_violations) == 0 and len(high_violations) == 0
-
-        return {
-            "valid": is_valid,
-            "violations": violations,
-            "summary": {
-                "total_violations": len(violations),
-                "critical": len(critical_violations),
-                "high": len([v for v in violations if v.get("severity") == "HIGH"]),
-                "medium": len([v for v in violations if v.get("severity") == "MEDIUM"]),
-                "low": len([v for v in violations if v.get("severity") == "LOW"]),
-            },
-            "scanners_used": [k for k, v in self.enabled_scanners.items() if v],
-            "policy_version": "1.0",
-        }
-
-    def _run_internal_policies(self, terraform_code: str) -> List[Dict[str, Any]]:
-        """Run internal policy rules"""
-        violations = []
-
-        import re
-
-        for category, rules in self.policy_rules.items():
-            for rule_name, rule_config in rules.items():
-                pattern = rule_config.get("pattern", "")
-                severity = rule_config.get("severity", "MEDIUM")
-                message = rule_config.get("message", f"Policy violation: {rule_name}")
-
-                try:
-                    if re.search(pattern, terraform_code, re.IGNORECASE | re.MULTILINE):
-                        violations.append(
-                            {
-                                "rule_id": f"{category}.{rule_name}",
-                                "severity": severity,
-                                "message": message,
-                                "scanner": "internal",
-                                "category": category,
-                                "fix_suggestion": self._get_fix_suggestion(rule_name),
-                            }
-                        )
-                except re.error as e:
-                    logger.error(f"Regex error in rule {category}.{rule_name}: {e}")
-                    continue
-
-        return violations
-
-    def _run_external_scanners(self, terraform_code: str) -> List[Dict[str, Any]]:
-        """Run external security scanners"""
-        violations = []
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            tf_file = Path(temp_dir) / "main.tf"
-            tf_file.write_text(terraform_code, encoding="utf-8", errors="ignore")
-
-            # Run tfsec if available
-            if self.enabled_scanners.get("tfsec", False):
-                tfsec_violations = self._run_tfsec(temp_dir)
-                violations.extend(tfsec_violations)
-
-            # Run checkov if available
-            if self.enabled_scanners.get("checkov", False):
-                checkov_violations = self._run_checkov(temp_dir)
-                violations.extend(checkov_violations)
-
-            # Run terrascan if available
-            if self.enabled_scanners.get("terrascan", False):
-                terrascan_violations = self._run_terrascan(temp_dir)
-                violations.extend(terrascan_violations)
-
-            # Run tflint if available
-            if self.enabled_scanners.get("tflint", False):
-                tflint_violations = self._run_tflint(temp_dir)
-                violations.extend(tflint_violations)
-
-        return violations
-
-    def _run_tfsec(self, directory: str) -> List[Dict[str, Any]]:
-        """Run tfsec security scanner"""
-        violations = []
-
-        try:
-            result = subprocess.run(
-                ["tfsec", directory, "--format", "json", "--no-color"],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-
-            if result.stdout:
-                try:
-                    tfsec_output = json.loads(result.stdout)
-                    results = tfsec_output.get("results", [])
-
-                    for issue in results:
-                        violations.append(
-                            {
-                                "rule_id": issue.get("rule_id", "tfsec-unknown"),
-                                "severity": self._normalize_severity(
-                                    issue.get("severity", "MEDIUM")
-                                ),
-                                "message": issue.get("description", "tfsec security issue"),
-                                "scanner": "tfsec",
-                                "category": "security",
-                                "line": issue.get("location", {}).get("start_line"),
-                                "fix_suggestion": issue.get(
-                                    "resolution",
-                                    "Review and fix security issue",
-                                ),
-                            }
-                        )
-
-                except json.JSONDecodeError:
-                    logger.warning("Failed to parse tfsec JSON output")
-
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            logger.warning(f"tfsec scan failed: {str(e)}")
-
-        return violations
-
-    def _run_checkov(self, directory: str) -> List[Dict[str, Any]]:
-        """Run checkov security scanner"""
-        violations = []
-
-        try:
-            result = subprocess.run(
-                ["checkov", "-d", directory, "--output", "json", "--quiet"],
-                capture_output=True,
-                text=True,
-                timeout=90,
-            )
-
-            if result.stdout:
-                try:
-                    checkov_output = json.loads(result.stdout)
-                    failed_checks = checkov_output.get("results", {}).get("failed_checks", [])
-
-                    for check in failed_checks:
-                        violations.append(
-                            {
-                                "rule_id": check.get("check_id", "checkov-unknown"),
-                                "severity": self._normalize_severity(
-                                    "HIGH"
-                                ),  # Checkov doesn't provide severity
-                                "message": check.get(
-                                    "check_name",
-                                    "Checkov security check failed",
-                                ),
-                                "scanner": "checkov",
-                                "category": "security",
-                                "file": check.get("file_path"),
-                                "line": check.get("file_line_range", [0])[0],
-                                "fix_suggestion": check.get(
-                                    "guideline", "Review Checkov documentation"
-                                ),
-                            }
-                        )
-
-                except json.JSONDecodeError:
-                    logger.warning("Failed to parse checkov JSON output")
-
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            logger.warning(f"checkov scan failed: {str(e)}")
-
-        return violations
-
-    def _run_terrascan(self, directory: str) -> List[Dict[str, Any]]:
-        """Run terrascan security scanner"""
-        violations = []
-
-        try:
-            result = subprocess.run(
-                ["terrascan", "scan", "-d", directory, "-o", "json"],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-
-            if result.stdout:
-                try:
-                    terrascan_output = json.loads(result.stdout)
-                    violations_data = terrascan_output.get("results", {}).get("violations", [])
-
-                    for violation in violations_data:
-                        violations.append(
-                            {
-                                "rule_id": violation.get("rule_id", "terrascan-unknown"),
-                                "severity": self._normalize_severity(
-                                    violation.get("severity", "MEDIUM")
-                                ),
-                                "message": violation.get("description", "Terrascan security issue"),
-                                "scanner": "terrascan",
-                                "category": violation.get("category", "security"),
-                                "line": violation.get("line"),
-                                "fix_suggestion": "Review Terrascan documentation for remediation",
-                            }
-                        )
-
-                except json.JSONDecodeError:
-                    logger.warning("Failed to parse terrascan JSON output")
-
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            logger.warning(f"terrascan scan failed: {str(e)}")
-
-        return violations
-
-    def _run_tflint(self, directory: str) -> List[Dict[str, Any]]:
-        """Run tflint linter"""
-        violations = []
-
-        try:
-            # Initialize tflint in the directory
-            subprocess.run(
-                ["tflint", "--init"],
-                cwd=directory,
-                capture_output=True,
-                timeout=30,
-            )
-
-            result = subprocess.run(
-                ["tflint", "--format", "json"],
-                cwd=directory,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-
-            if result.stdout:
-                try:
-                    tflint_output = json.loads(result.stdout)
-                    issues = tflint_output.get("issues", [])
-
-                    for issue in issues:
-                        violations.append(
-                            {
-                                "rule_id": issue.get("rule", {}).get("name", "tflint-unknown"),
-                                "severity": self._normalize_severity(
-                                    issue.get("rule", {}).get("severity", "MEDIUM")
-                                ),
-                                "message": issue.get("message", "TFLint issue"),
-                                "scanner": "tflint",
-                                "category": "linting",
-                                "line": issue.get("range", {}).get("start", {}).get("line"),
-                                "fix_suggestion": "Review TFLint documentation for remediation",
-                            }
-                        )
-
-                except json.JSONDecodeError:
-                    logger.warning("Failed to parse tflint JSON output")
-
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            logger.warning(f"tflint scan failed: {str(e)}")
-
-        return violations
-
-    def _normalize_severity(self, severity: str) -> str:
-        """Normalize severity levels across different scanners"""
-        severity_map = {
-            "error": "CRITICAL",
-            "warning": "MEDIUM",
-            "info": "LOW",
-            "critical": "CRITICAL",
-            "high": "HIGH",
-            "medium": "MEDIUM",
-            "low": "LOW",
-        }
-
-        return severity_map.get(severity.lower(), "MEDIUM")
-
-    def _get_fix_suggestion(self, rule_name: str) -> str:
-        """Get fix suggestions for common policy violations"""
-        suggestions = {
-            "no_unrestricted_ingress": "Restrict CIDR blocks to specific IP ranges instead of 0.0.0.0/0",
-            "no_ssh_from_internet": "Restrict SSH access to specific IP ranges or use a bastion host",
-            "block_public_access": "Enable S3 bucket public access blocks",
-            "versioning_enabled": "Enable S3 bucket versioning for data protection",
-            "encryption_at_rest": "Enable storage encryption for RDS instances",
-            "backup_retention": "Set backup_retention_period > 0 for RDS instances",
-            "no_hardcoded_secrets": "Use variables, AWS Secrets Manager, or Parameter Store",
-        }
-
-        return suggestions.get(rule_name, "Review security best practices documentation")
-
-    def get_policy_summary(self) -> Dict[str, Any]:
-        """Get summary of available policies and scanners"""
-        return {
-            "policy_engine_version": "1.0",
-            "internal_policies": {
-                category: len(rules) for category, rules in self.policy_rules.items()
-            },
-            "external_scanners": self.enabled_scanners,
-            "total_internal_rules": sum(len(rules) for rules in self.policy_rules.values()),
-            "scanning_capabilities": [
-                scanner for scanner, available in self.enabled_scanners.items() if available
-            ],
-        }
-
-    def create_policy_report(
-        self, validation_result: Dict[str, Any], terraform_code: str
-    ) -> Dict[str, Any]:
-        """Create comprehensive policy validation report"""
-        violations = validation_result.get("violations", [])
-
-        # Group violations by scanner
-        violations_by_scanner = {}
-        for violation in violations:
-            scanner = violation.get("scanner", "unknown")
-            if scanner not in violations_by_scanner:
-                violations_by_scanner[scanner] = []
-            violations_by_scanner[scanner].append(violation)
-
-        # Group violations by severity
-        violations_by_severity = {}
-        for violation in violations:
-            severity = violation.get("severity", "MEDIUM")
-            if severity not in violations_by_severity:
-                violations_by_severity[severity] = []
-            violations_by_severity[severity].append(violation)
-
-        # Calculate security score (0-100)
-        total_violations = len(violations)
-        critical_count = len(violations_by_severity.get("CRITICAL", []))
-        high_count = len(violations_by_severity.get("HIGH", []))
-        medium_count = len(violations_by_severity.get("MEDIUM", []))
-
-        # Security score calculation
-        penalty = critical_count * 25 + high_count * 10 + medium_count * 3
-        security_score = max(0, 100 - penalty)
-
-        return {
-            # Would use datetime.now() in real implementation
-            "report_timestamp": "2024-01-01T00:00:00Z",
-            "terraform_code_lines": len(terraform_code.splitlines()),
-            "validation_result": validation_result.get("valid", False),
-            "security_score": security_score,
-            "total_violations": total_violations,
-            "violations_by_severity": violations_by_severity,
-            "violations_by_scanner": violations_by_scanner,
-            "scanners_used": validation_result.get("scanners_used", []),
-            "recommendations": self._generate_recommendations(violations),
-            "compliance_status": self._assess_compliance(violations),
-        }
-
-    def _generate_recommendations(self, violations: List[Dict[str, Any]]) -> List[str]:
-        """Generate recommendations based on violations"""
-        recommendations = []
-
-        critical_violations = [v for v in violations if v.get("severity") == "CRITICAL"]
-        if critical_violations:
-            recommendations.append(
-                "[CRITICAL] URGENT: Address critical security violations before deployment"
-            )
-
-        high_violations = [v for v in violations if v.get("severity") == "HIGH"]
-        if high_violations:
-            recommendations.append(
-                "[WARN] HIGH PRIORITY: Review and fix high-severity security issues"
-            )
-
-        # Specific recommendations based on violation patterns
-        violation_types = [v.get("category", "unknown") for v in violations]
-
-        if "aws_security_groups" in str(violation_types):
-            recommendations.append(
-                "[SECURE] Review security group rules and apply principle of least privilege"
-            )
-
-        if "aws_s3_buckets" in str(violation_types):
-            recommendations.append(
-                "[S3] Enable S3 security features: versioning, encryption, and access controls"
-            )
-
-        if any("hardcoded" in v.get("message", "").lower() for v in violations):
-            recommendations.append(
-                "[SECRET] Remove hardcoded credentials and use proper secret management"
-            )
-
-        return recommendations
-
-    def _assess_compliance(self, violations: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Assess compliance with common frameworks"""
-        compliance = {
-            "SOC2": "COMPLIANT",
-            "PCI_DSS": "COMPLIANT",
-            "GDPR": "COMPLIANT",
-            "HIPAA": "COMPLIANT",
-        }
-
-        critical_violations = [v for v in violations if v.get("severity") == "CRITICAL"]
-        high_violations = [v for v in violations if v.get("severity") == "HIGH"]
-
-        if critical_violations or len(high_violations) > 3:
-            # Mark all as non-compliant if critical issues exist
-            for framework in compliance.keys():
-                compliance[framework] = "NON_COMPLIANT"
-
-        return compliance
-
-    # === APPEND: AST-based validation utilities (non-destructive) ===
-
-
-_SOC2_CONTROLS = {"network_segmentation": "Security groups should restrict ingress/egress broadly."}
-_HIPAA_CONTROLS = {"https_only": "ALB/CloudFront listeners should enforce HTTPS."}
-
-
-def _pe_parse_hcl(tf_code: str) -> _Dict[str, _Any]:
+# -----------------------------
+# Data model
+# -----------------------------
+SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
+
+
+@dataclass
+class Violation:
+    id: str
+    message: str
+    severity: str = "MEDIUM"
+    source: str = "builtin"
+    resource: Optional[str] = None
+    file: Optional[str] = None
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
+    guideline: Optional[str] = None
+
+    def normalize(self) -> "Violation":
+        sev = (self.severity or "MEDIUM").upper()
+        if sev not in SEVERITY_ORDER:
+            sev = "MEDIUM"
+        self.severity = sev
+        return self
+
+
+# -----------------------------
+# Helpers
+# -----------------------------
+def _run_cmd(cmd: List[str], cwd: Optional[str] = None, timeout: int = 60) -> Dict[str, Any]:
+    """Run a command and capture output. Never raises."""
     try:
-        return _pe_hcl2.load(_PE_StringIO(tf_code))
-    except Exception as e:
-        return {"__parse_error__": str(e)}
-
-
-def _pe_open_sg(ast: _Dict[str, _Any]) -> _List[str]:
-    f: _List[str] = []
-    for block in ast.get("resource", []):
-        if "aws_security_group" in block:
-            for name, sg in block["aws_security_group"].items():
-                ingress = sg.get("ingress", [])
-                if not isinstance(ingress, list):
-                    ingress = [ingress]
-                for rule in ingress:
-                    cidrs = (rule.get("cidr_blocks") or []) + (rule.get("ipv6_cidr_blocks") or [])
-                    if "0.0.0.0/0" in cidrs or "::/0" in cidrs:
-                        f.append(f"Open ingress in security group '{name}'")
-    return f
-
-
-async def validate_terraform_code_ast(tf_code: str) -> _Dict[str, _Any]:
-    """
-    Additive validator using AST + tfsec/checkov. Does not alter your original policy engine.
-    """
-    ast = _pe_parse_hcl(tf_code)
-    findings = []
-    controls = {"soc2": [], "hipaa": []}
-    if "__parse_error__" in ast:
+        result = subprocess.run(
+            cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False
+        )
+        return {
+            "success": result.returncode == 0,
+            "returncode": result.returncode,
+            "stdout": result.stdout or "",
+            "stderr": result.stderr or "",
+        }
+    except subprocess.TimeoutExpired:
         return {
             "success": False,
-            "data": {},
-            "error": f"HCL parse failed: {ast['__parse_error__']}",
+            "returncode": -1,
+            "stdout": "",
+            "stderr": f"timeout after {timeout}s",
+        }
+    except FileNotFoundError:
+        return {
+            "success": False,
+            "returncode": 127,
+            "stdout": "",
+            "stderr": f"tool not found: {cmd[0]}",
+        }
+    except Exception as e:  # pragma: no cover
+        return {"success": False, "returncode": 1, "stdout": "", "stderr": str(e)}
+
+
+def _which(name: str) -> bool:
+    return shutil.which(name) is not None
+
+
+def _summarize_severity(violations: List[Violation]) -> Dict[str, int]:
+    summary = {k: 0 for k in SEVERITY_ORDER}
+    for v in violations:
+        summary[v.severity] = summary.get(v.severity, 0) + 1
+    summary["TOTAL"] = len(violations)
+    return summary
+
+
+def _mk_temp_tfdir(terraform_code: str) -> Tuple[str, Path]:
+    tmpdir = tempfile.mkdtemp(prefix="policy_")
+    tf_path = Path(tmpdir) / "main.tf"
+    tf_path.write_text(terraform_code or "", encoding="utf-8")
+    return tmpdir, tf_path
+
+
+def _safe_json_load(s: str) -> Any:
+    try:
+        return json.loads(s)
+    except Exception:
+        return None
+
+
+# -----------------------------
+# Engine
+# -----------------------------
+class PolicyEngine:
+    def __init__(self) -> None:
+        self.enabled_scanners: Dict[str, bool] = {
+            "tfsec": _which("tfsec"),
+            "checkov": _which("checkov"),
+            "conftest": _which("conftest"),
+            "tflint": _which("tflint"),
+            "terrascan": _which("terrascan"),
         }
 
-    findings += _pe_open_sg(ast)
-    if any("Open ingress" in f for f in findings):
-        controls["soc2"].append(_SOC2_CONTROLS["network_segmentation"])
-        controls["hipaa"].append(_HIPAA_CONTROLS["https_only"])
+    # -------- Built-in lightweight checks (regex) --------
+    def _builtin_checks(self, code: str) -> List[Violation]:
+        v: List[Violation] = []
+        if not code:
+            return v
 
-    with _pe_secure_tempdir("policy_v2_") as d:
-        import os as _os
+        rules = [
+            (
+                r'cidr_blocks\s*=\s*\["0\.0\.0\.0/0"\]',
+                "Security group open to the world (0.0.0.0/0).",
+                "HIGH",
+                "SG-0001",
+            ),
+            (
+                r"publicly_accessible\s*=\s*true",
+                "Database is publicly accessible.",
+                "HIGH",
+                "DB-0001",
+            ),
+            (
+                r"force_destroy\s*=\s*true",
+                "Destructive deletion enabled (e.g. S3 bucket).",
+                "HIGH",
+                "S3-0001",
+            ),
+            (
+                r"skip_final_snapshot\s*=\s*true",
+                "RDS final snapshot is skipped on deletion.",
+                "MEDIUM",
+                "RDS-0002",
+            ),
+            (
+                r"deletion_protection\s*=\s*false",
+                "Deletion protection disabled.",
+                "MEDIUM",
+                "GEN-0003",
+            ),
+            (
+                r'access_key\s*=\s*".*"',
+                "Hardcoded AWS access key detected.",
+                "CRITICAL",
+                "IAM-0001",
+            ),
+            (
+                r'secret_key\s*=\s*".*"',
+                "Hardcoded AWS secret key detected.",
+                "CRITICAL",
+                "IAM-0002",
+            ),
+            (r'password\s*=\s*".*"', "Hardcoded password detected.", "CRITICAL", "SEC-0003"),
+        ]
 
-        with open(_os.path.join(d, "main.tf"), "w", encoding="utf-8") as f:
-            f.write(tf_code)
-        rc1, out1, err1 = await _pe_run_cmd_async("tfsec", "--format", "json", d)
-        rc2, out2, err2 = await _pe_run_cmd_async("checkov", "-d", d, "-o", "json")
-        tfsec = _pe_json.loads(out1 or "{}") if rc1 == 0 else {"error": err1}
-        checkov = _pe_json.loads(out2 or "{}") if rc2 == 0 else {"error": err2}
+        for pattern, msg, sev, rid in rules:
+            if re.search(pattern, code, re.IGNORECASE):
+                v.append(Violation(id=rid, message=msg, severity=sev, source="builtin").normalize())
 
-    return {
-        "success": True,
-        "data": {
-            "findings": findings,
-            "controls": controls,
-            "tfsec": tfsec,
-            "checkov": checkov,
-        },
-        "error": "",
-    }
+        # S3 bucket public ACL
+        if re.search(r'resource\s+"aws_s3_bucket(_acl)?"\s+"[^"]+"\s*{', code):
+            if re.search(r'acl\s*=\s*"(public-read|public-read-write)"', code, re.IGNORECASE):
+                v.append(
+                    Violation(
+                        id="S3-0002",
+                        message="Public S3 ACL set.",
+                        severity="HIGH",
+                        source="builtin",
+                    ).normalize()
+                )
+
+        # Missing required_providers/version pins
+        if "required_providers" not in code:
+            v.append(
+                Violation(
+                    id="TF-0001",
+                    message="Pin provider versions via required_providers.",
+                    severity="LOW",
+                    source="builtin",
+                ).normalize()
+            )
+        if "required_version" not in code:
+            v.append(
+                Violation(
+                    id="TF-0002",
+                    message="Pin Terraform required_version.",
+                    severity="LOW",
+                    source="builtin",
+                ).normalize()
+            )
+
+        return v
+
+    # -------- External scanners --------
+    def _run_tfsec(self, tfdir: str) -> Tuple[List[Violation], Dict[str, Any]]:
+        if not self.enabled_scanners.get("tfsec"):
+            return [], {"available": False, "error": "tfsec not installed"}
+
+        cmd = ["tfsec", "--no-colour", "--format", "json", "--soft-fail", tfdir]
+        with metrics.tool_timer("tfsec"):
+            r = _run_cmd(cmd, cwd=tfdir, timeout=120)
+        if r["returncode"] == 127:
+            return [], {"available": False, "error": r["stderr"]}
+        data = _safe_json_load(r.get("stdout", "")) or {}
+        violations: List[Violation] = []
+        for item in data.get("results", []):
+            loc = item.get("location", {}) or {}
+            v = Violation(
+                id=str(item.get("rule_id") or item.get("id") or "TFSEC"),
+                message=str(
+                    item.get("description") or item.get("long_description") or "tfsec finding"
+                ),
+                severity=str(item.get("severity") or "MEDIUM"),
+                source="tfsec",
+                resource=item.get("resource"),
+                file=loc.get("filename"),
+                start_line=loc.get("start_line") or loc.get("start") or None,
+                end_line=loc.get("end_line") or None,
+                guideline=(item.get("links") or [None])[0],
+            ).normalize()
+            violations.append(v)
+        return violations, {"available": True, "raw": data, "stderr": r.get("stderr", "")}
+
+    def _run_checkov(self, tfdir: str, tfpath: Path) -> Tuple[List[Violation], Dict[str, Any]]:
+        if not self.enabled_scanners.get("checkov"):
+            return [], {"available": False, "error": "checkov not installed"}
+
+        # Prefer scanning the file to avoid network/etc.
+        cmd = ["checkov", "-f", str(tfpath), "-o", "json", "--framework", "terraform"]
+        with metrics.tool_timer("checkov"):
+            r = _run_cmd(cmd, cwd=tfdir, timeout=180)
+        if r["returncode"] == 127:
+            return [], {"available": False, "error": r["stderr"]}
+        data = _safe_json_load(r.get("stdout", "")) or {}
+
+        violations: List[Violation] = []
+        # Checkov JSON may put failed checks under 'results' or 'summary' structures
+        for section in ("results",):
+            res = data.get(section) or {}
+            for check in res.get("failed_checks", []) or []:
+                v = Violation(
+                    id=str(check.get("check_id") or "CKV_UNKNOWN"),
+                    message=str(check.get("check_name") or "checkov finding"),
+                    severity=str(check.get("severity") or "MEDIUM"),
+                    source="checkov",
+                    resource=check.get("resource"),
+                    file=check.get("file_path"),
+                    start_line=check.get("file_line_range", [None, None])[0],
+                    end_line=check.get("file_line_range", [None, None])[1],
+                    guideline=(
+                        (check.get("guideline") or (check.get("guidelines") or [None]))[0]
+                        if isinstance(check.get("guidelines"), list)
+                        else check.get("guideline")
+                    ),
+                ).normalize()
+                violations.append(v)
+        # Some versions place it in 'check_type' items
+        if not violations:
+            for item in data if isinstance(data, list) else []:
+                failed = (item.get("summary") or {}).get("failed", 0)
+                if failed and item.get("results", {}).get("failed_checks"):
+                    for check in item["results"]["failed_checks"]:
+                        v = Violation(
+                            id=str(check.get("check_id") or "CKV_UNKNOWN"),
+                            message=str(check.get("check_name") or "checkov finding"),
+                            severity=str(check.get("severity") or "MEDIUM"),
+                            source="checkov",
+                            resource=check.get("resource"),
+                            file=check.get("file_path"),
+                            start_line=check.get("file_line_range", [None, None])[0],
+                            end_line=check.get("file_line_range", [None, None])[1],
+                            guideline=check.get("guideline"),
+                        ).normalize()
+                        violations.append(v)
+
+        return violations, {"available": True, "raw": data, "stderr": r.get("stderr", "")}
+
+    def _run_conftest(self, tfdir: str) -> Tuple[List[Violation], Dict[str, Any]]:
+        if not self.enabled_scanners.get("conftest"):
+            return [], {"available": False, "error": "conftest not installed"}
+        # This assumes there are Rego policies in ./policy/ - if none, conftest returns 0
+        # We still capture output for completeness.
+        cmd = ["conftest", "test", "--no-color", "--output", "json", "."]
+        with metrics.tool_timer("conftest"):
+            r = _run_cmd(cmd, cwd=tfdir, timeout=90)
+        data = _safe_json_load(r.get("stdout", "")) or []
+        violations: List[Violation] = []
+        for file_result in data:
+            for res in file_result.get("failures", []):
+                v = Violation(
+                    id=str(res.get("code") or "REGO"),
+                    message=str(res.get("msg") or "policy failure"),
+                    severity="MEDIUM",
+                    source="conftest",
+                    file=file_result.get("filename"),
+                ).normalize()
+                violations.append(v)
+        return violations, {"available": True, "raw": data, "stderr": r.get("stderr", "")}
+
+    def _run_tflint(self, tfdir: str) -> Tuple[List[Violation], Dict[str, Any]]:
+        if not self.enabled_scanners.get("tflint"):
+            return [], {"available": False, "error": "tflint not installed"}
+        cmd = ["tflint", "--format", "json"]
+        with metrics.tool_timer("tflint"):
+            r = _run_cmd(cmd, cwd=tfdir, timeout=90)
+        data = _safe_json_load(r.get("stdout", "")) or {}
+        violations: List[Violation] = []
+        for diag in data.get("diagnostics", []):
+            v = Violation(
+                id=str(diag.get("rule") or "TFLINT"),
+                message=str(diag.get("message") or "tflint issue"),
+                severity=str(diag.get("severity") or "MEDIUM"),
+                source="tflint",
+                file=diag.get("range", {}).get("filename"),
+                start_line=(diag.get("range", {}).get("start", {}) or {}).get("line"),
+                end_line=(diag.get("range", {}).get("end", {}) or {}).get("line"),
+            ).normalize()
+            violations.append(v)
+        return violations, {"available": True, "raw": data, "stderr": r.get("stderr", "")}
+
+    def _run_terrascan(self, tfdir: str) -> Tuple[List[Violation], Dict[str, Any]]:
+        if not self.enabled_scanners.get("terrascan"):
+            return [], {"available": False, "error": "terrascan not installed"}
+        cmd = ["terrascan", "scan", "-o", "json"]
+        with metrics.tool_timer("terrascan"):
+            r = _run_cmd(cmd, cwd=tfdir, timeout=180)
+        data = _safe_json_load(r.get("stdout", "")) or {}
+        violations: List[Violation] = []
+        for res in (data.get("results", {}) or {}).get("violations", []):
+            v = Violation(
+                id=str(res.get("rule_id") or "TERRASCAN"),
+                message=str(res.get("description") or "terrascan violation"),
+                severity=str(res.get("severity") or "MEDIUM"),
+                source="terrascan",
+                file=(res.get("file") or {}).get("file"),
+                start_line=(res.get("location", {}) or {}).get("start_line"),
+                end_line=(res.get("location", {}) or {}).get("end_line"),
+            ).normalize()
+            violations.append(v)
+        return violations, {"available": True, "raw": data, "stderr": r.get("stderr", "")}
+
+    # -------- Public API --------
+    def validate_with_policies(self, terraform_code: str) -> Dict[str, Any]:
+        """
+        Validate Terraform code with external scanners (when available) plus built-in rules.
+        Returns a normalized result dict with violations and a summary.
+        """
+        if not terraform_code or not terraform_code.strip():
+            return {
+                "success": False,
+                "violations": [],
+                "warnings": ["empty terraform code"],
+                "summary": {"TOTAL": 0},
+            }
+
+        tmpdir, tfpath = _mk_temp_tfdir(terraform_code)
+        all_violations: List[Violation] = []
+        scanner_results: Dict[str, Any] = {}
+        try:
+            # External scanners
+            for name, runner in (
+                ("tfsec", self._run_tfsec),
+                ("checkov", lambda d: self._run_checkov(d, tfpath)),
+                ("conftest", self._run_conftest),
+                ("tflint", self._run_tflint),
+                ("terrascan", self._run_terrascan),
+            ):
+                try:
+                    vios, raw = runner(tmpdir)
+                    scanner_results[name] = raw
+                    all_violations.extend(vios)
+                except Exception as e:  # never fail completely
+                    logger.warning("Scanner %s failed: %s", name, e)
+                    scanner_results[name] = {"available": False, "error": str(e)}
+
+            # Built-in
+            all_violations.extend(self._builtin_checks(terraform_code))
+
+            # Normalize & summarize
+            norm = [v.normalize() for v in all_violations]
+            # sort by severity
+            norm.sort(key=lambda v: (SEVERITY_ORDER.index(v.severity), v.id))
+            summary = _summarize_severity(norm)
+
+            return {
+                "success": True,
+                "violations": [asdict(v) for v in norm],
+                "warnings": [],
+                "summary": summary,
+                "scanner_results": scanner_results,
+            }
+        finally:
+            try:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+            except Exception:
+                pass
+
+    def create_policy_report(self, policy_result: Dict[str, Any], terraform_code: str) -> str:
+        """
+        Build a Markdown report including a summary and top issues.
+        """
+        if not policy_result or not isinstance(policy_result, dict):
+            return "No policy results available."
+
+        summary = policy_result.get("summary") or {}
+        vios = policy_result.get("violations") or []
+        top = vios[: min(15, len(vios))]
+
+        lines: List[str] = []
+        lines.append("## Policy & Security Report")
+        lines.append("")
+        if summary:
+            parts = [f"{k}: {v}" for k, v in summary.items() if k in SEVERITY_ORDER + ["TOTAL"]]
+            lines.append("**Summary:** " + ", ".join(parts))
+            lines.append("")
+
+        if top:
+            lines.append("### Top Findings")
+            lines.append("")
+            for v in top:
+                sev = v.get("severity", "MEDIUM")
+                src = v.get("source", "policy")
+                vid = v.get("id", "ID")
+                msg = v.get("message", "")
+                file = v.get("file")
+                line = v.get("start_line")
+                where = f" ({file}:{line})" if file and line else ""
+                lines.append(f"- **[{sev}] {vid}** ({src}) — {msg}{where}")
+            lines.append("")
+
+        # Hints
+        if not vios:
+            lines.append("✅ No violations detected by scanners or built-in rules.")
+        else:
+            lines.append(
+                "_Consider addressing the issues above. Some scanners may be disabled or missing locally._"
+            )
+
+        return "\\n".join(lines)
 
 
-# Global policy engine instance
+# Singleton export used throughout the app
 policy_engine = PolicyEngine()

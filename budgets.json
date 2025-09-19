@@ -1,0 +1,45 @@
+{
+  "workspaces": {
+    "default": {
+      "monthly_limit": 100.0,
+      "alert_thresholds": [
+        50.0,
+        80.0,
+        100.0
+      ],
+      "currency": "USD"
+    },
+    "development": {
+      "monthly_limit": 200.0,
+      "alert_thresholds": [
+        100.0,
+        150.0,
+        200.0
+      ],
+      "currency": "USD"
+    },
+    "staging": {
+      "monthly_limit": 500.0,
+      "alert_thresholds": [
+        250.0,
+        400.0,
+        500.0
+      ],
+      "currency": "USD"
+    },
+    "production": {
+      "monthly_limit": 2000.0,
+      "alert_thresholds": [
+        1000.0,
+        1500.0,
+        2000.0
+      ],
+      "currency": "USD"
+    }
+  },
+  "global_settings": {
+    "default_currency": "USD",
+    "enable_alerts": true,
+    "cost_increase_threshold_percent": 20.0
+  }
+}
